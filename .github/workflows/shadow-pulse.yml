@@ -1,6 +1,7 @@
 name: shadow-pulse
 # 公域影子引擎脉冲：消费对线公域 outbox → weave/pulse/ 快照 + pulse.log 哈希链
 on:
+  schedule: [{ cron: '33 */6 * * *' }]  # 6h 值班脉冲（错峰）——安装≠运转（EYE-002 Y2 整改）
   workflow_dispatch: {}
   repository_dispatch:
     types: [shadow-pulse]
