@@ -1,0 +1,8 @@
+{
+ "repo": "vci-playground",
+ "line": "ci-playground",
+ "tag": "演练承接",
+ "spec": "SHADOW-CI-01",
+ "lane": "provision/vci",
+ "v": 1
+}
