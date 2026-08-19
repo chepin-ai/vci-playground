@@ -1,12 +1,13 @@
 name: shadow-pulse
-# 公域影子引擎脉冲：消费对线公域 outbox → weave/pulse/ 快照 + pulse.log 哈希链
+# 公域影子引擎 v2（VCI-LOAD-01 波1 实载：心跳+本线状态快照+真哈希链+对外验证面）
+# 私域数据一律指纹/状态码级（L2 永不落公仓）；承接私仓 CI 轻量三职（RESTART-GUIDE-01 轨1）
 on:
-  schedule: [{ cron: '33 */6 * * *' }]  # 6h 值班脉冲（错峰）——安装≠运转（EYE-002 Y2 整改）
+  schedule: [{ cron: '33 */6 * * *' }]  # 6h 值班脉冲（错峰，沿用 v1 槽位）
   workflow_dispatch: {}
   repository_dispatch:
     types: [shadow-pulse]
   push:
-    paths: ['engine/**']
+    paths: ['.github/workflows/shadow-pulse.yml', 'engine/**']
 permissions:
   contents: write
 jobs:
@@ -17,36 +18,56 @@ jobs:
       - name: 脉冲
         env:
           LINE: ci-playground
+          VREPO: vci-playground
         run: |
           python3 - <<'PYEOF'
-          import json, os, urllib.request, datetime, hashlib, base64
-          line=os.environ['LINE']; ts=datetime.datetime.utcnow().strftime('%Y%m%d-%H%M%S')
-          UA={'User-Agent':'shadow-pulse','Accept':'application/vnd.github+json'}
+          import json, os, urllib.request, datetime, hashlib
+          line=os.environ['LINE']; repo=os.environ['VREPO']
+          ts=datetime.datetime.utcnow().strftime('%Y%m%d-%H%M%S')
+          UA={'User-Agent':'shadow-pulse-v2','Accept':'application/vnd.github+json'}
           def get(u):
               req=urllib.request.Request(u,headers=UA)
               try:
                   with urllib.request.urlopen(req,timeout=20) as r: return r.status,r.read()
               except Exception as e: return getattr(e,'code',0),b''
+          # ── 快照采集（公域 L0/L1：注册表 + 对线 outbox 指纹级）──
+          snap={'registry':None,'outbox':None}
           s,raw=get('https://raw.githubusercontent.com/chepin-ai/ci-control/main/bridge/outboxes.json')
-          rec={'ts':ts,'line':line,'outbox':None,'note':''}
           if s==200:
-              url=(json.loads(raw).get('sessions',{}).get(line) or {}).get('url')
+              ss=json.loads(raw).get('sessions',{})
+              snap['registry']='registered' if line in ss and (ss[line] or {}).get('url') else ('listed-no-url' if line in ss else 'not-registered')
+              url=(ss.get(line) or {}).get('url')
               if url:
                   s2,body=get(url)
-                  rec['outbox']={'url':url,'http':s2,'sha256':hashlib.sha256(body).hexdigest()[:16] if s2==200 else None}
-                  rec['note']='snapshot ok' if s2==200 else 'outbox unreachable'
-              else: rec['note']='line not registered in outboxes.json'
-          else: rec['note']='registry unreachable'
+                  snap['outbox']={'http':s2,'sha256_16':hashlib.sha256(body).hexdigest()[:16] if s2==200 else None}
+          else:
+              snap['registry']='registry-unreachable'
+          # ── 自链头（读 pulse.log 末行）──
+          prev_chain='0'*16; pulses=0
+          if os.path.exists('pulse.log'):
+              lines=[l for l in open('pulse.log').read().strip().split('\n') if l.strip()]
+              pulses=len(lines)
+              if lines:
+                  prev_chain=lines[-1].split()[2] if len(lines[-1].split())>=3 else prev_chain
+          # ── 心跳件 + 真哈希链 ──
+          rec={'ts':ts,'line':line,'vrepo':repo,'snapshot':snap,'prev_chain':prev_chain}
           os.makedirs('weave/pulse',exist_ok=True)
           p='weave/pulse/%s.json'%ts
           open(p,'w').write(json.dumps(rec,ensure_ascii=False,indent=1))
-          h=hashlib.sha256(open(p,'rb').read()).hexdigest()[:16]
-          with open('pulse.log','a') as f: f.write('%s %s %s %s\n'%(ts,line,h,rec['note']))
-          print(json.dumps(rec,ensure_ascii=False))
+          fsha=hashlib.sha256(open(p,'rb').read()).hexdigest()
+          chain=hashlib.sha256((prev_chain+fsha).encode()).hexdigest()[:16]
+          with open('pulse.log','a') as f: f.write('%s %s %s %s\n'%(ts,line,chain,'v2-bearer'))
+          verdict='ok' if snap.get('registry') in ('registered','listed-no-url','not-registered') else 'degraded'
+          # ── 对外验证面（稳定公域路径，免 API 验活）──
+          status={'line':line,'vrepo':repo,'last_pulse':ts,'chain_head':chain,'pulses_total':pulses+1,
+                  'snapshot':snap,'verdict':verdict,'spec':'VCI-LOAD-01 波1（心跳/快照/写链/对外验证面）'}
+          open('weave/status.json','w').write(json.dumps(status,ensure_ascii=False,indent=1))
+          print(json.dumps(status,ensure_ascii=False))
+
           PYEOF
       - name: 自提交成链
         run: |
           git config user.name "shadow-pulse[bot]"; git config user.email "shadow-pulse@users.noreply.github.com"
-          git add weave/pulse pulse.log || true
-          git commit -m "pulse $(date -u +%Y%m%d-%H%M%S) $LINE" || echo "无变更"
+          git add weave/pulse weave/status.json pulse.log || true
+          git commit -m "pulse $(date -u +%Y%m%d-%H%M%S) $LINE v2" || echo "无变更"
           git push
