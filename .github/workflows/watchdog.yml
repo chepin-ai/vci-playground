@@ -1,0 +1,56 @@
+name: watchdog
+# O 件故障即报（NEG-EVENT-01 对偶律：负面状态事件驱动）——本仓任何 workflow 跑红即秒级投 ALERT 件至 vci-inbox 快门信道
+# 边界如实声明：私仓面 Actions 账户级死亡发不了事件，本器只覆公仓面；私仓红态由 P 顺风车扫描+cisbr-ci 只读 App（待 root 裁）补
+on:
+  workflow_run:
+    types: [completed]
+permissions:
+  actions: read
+jobs:
+  bark:
+    if: ${{ github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.name != 'watchdog' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/create-github-app-token@v1
+        id: app
+        with:
+          app-id: ${{ secrets.CI_OPS_APP_ID }}
+          private-key: ${{ secrets.CI_OPS_APP_KEY }}
+          owner: chepin-ai
+      - name: ALERT 投快门
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          REPO: ${{ github.repository }}
+          WF_NAME: ${{ github.event.workflow_run.name }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          python3 - <<'PYEOF'
+          import os, json, base64, datetime, hashlib, requests
+          GH='https://api.github.com'
+          H={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'}
+          ts=datetime.datetime.now(datetime.timezone.utc).strftime('%FT%TZ')
+          repo=os.environ['REPO']; wf=os.environ['WF_NAME']; rid=os.environ['RUN_ID']; url=os.environ['RUN_URL']
+          fp=hashlib.sha256((repo+'/'+wf).encode()).hexdigest()[:10]
+          # 指纹去重（7 天）：同仓同 workflow 红只报一次
+          al={}
+          r=requests.get(f'{GH}/repos/{repo}/contents/weave/alerted.json',headers=H,timeout=15)
+          sha=None
+          if r.status_code==200:
+              sha=r.json()['sha']
+              try: al=json.loads(base64.b64decode(r.json()['content']).decode())
+              except Exception: pass
+          cut=(datetime.datetime.now(datetime.timezone.utc)-datetime.timedelta(days=7)).strftime('%FT%TZ')
+          if al.get(fp,'')>cut:
+              print('dedup：7 天内已报', fp); raise SystemExit(0)
+          al[fp]=ts
+          b={'message':'watchdog alerted '+fp,'content':base64.b64encode(json.dumps(al).encode()).decode()}
+          if sha: b['sha']=sha
+          requests.put(f'{GH}/repos/{repo}/contents/weave/alerted.json',headers=H,json=b,timeout=20)
+          # ALERT 件→vci-inbox 快门信道（NEG-EVENT-01：负面状态事件驱动；L0 内容）
+          body=f'ALERT 故障即报 {ts}\nrepo: {repo}\nworkflow: {wf}\nrun: {rid}\nconclusion: failure\nurl: {url}\ndtag: neg-event alert-{fp}\n'
+          u=f'{GH}/repos/chepin-ai/vci-inbox/contents/files-inbox/cisvr/ALERT-{repo.replace("/","_")}-{wf}-{rid}.txt'
+          r2=requests.put(u,headers=H,json={'message':f'ALERT {wf} 红 {fp}','content':base64.b64encode(body.encode()).decode()},timeout=20)
+          print('ALERT put:', r2.status_code)
+
+          PYEOF
