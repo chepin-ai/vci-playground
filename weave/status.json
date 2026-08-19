@@ -2,12 +2,13 @@
  "line": "ci-playground",
  "vrepo": "vci-playground",
  "last_pulse": "20260819-011035",
- "chain_head": "c6c6e8241f9d3911",
+ "chain_head": "e69cd6001c697d56",
  "pulses_total": 4,
  "snapshot": {
   "registry": "not-registered",
   "outbox": null
  },
  "verdict": "ok",
- "spec": "VCI-LOAD-01 波1（心跳/快照/写链/对外验证面）"
+ "spec": "VCI-LOAD-01 波1（心跳/快照/写链/对外验证面）",
+ "heal_note": "F2 愈合 2026-08-19T08:17:23Z：status 链头重建对齐 pulse.log"
 }
