@@ -1,4 +1,4 @@
-# LINE-PRODUCER —— Y8① 线阵生产侧：本仓状态件 PUT ci-control/bridge/lines/（公面 Dashboard 读；省分钟：push 自燃+6h 兜底班）
+# LINE-PRODUCER（v1.1 湍流窗后重燃） —— Y8① 线阵生产侧：本仓状态件 PUT ci-control/bridge/lines/（公面 Dashboard 读；省分钟：push 自燃+6h 兜底班）
 name: line-producer
 on:
   workflow_dispatch: {}
