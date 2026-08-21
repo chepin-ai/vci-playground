@@ -1,0 +1,53 @@
+# LINE-PRODUCER —— Y8① 线阵生产侧：本仓状态件 PUT ci-control/bridge/lines/（公面 Dashboard 读；省分钟：push 自燃+6h 兜底班）
+name: line-producer
+on:
+  workflow_dispatch: {}
+  push:
+    paths: ['.github/workflows/line-producer.yml', 'weave/**']
+  schedule:
+    - cron: '11 */6 * * *'
+permissions:
+  contents: read
+jobs:
+  produce:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/create-github-app-token@v1
+        id: app
+        with:
+          app-id: ${{ secrets.CI_OPS_APP_ID || vars.CI_OPS_APP_ID }}
+          private-key: ${{ secrets.CI_OPS_APP_KEY }}
+          owner: chepin-ai
+      - name: 产线状态件
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          LINE: "playground"
+          SELF_REPO: "${{ github.repository }}"
+        run: |
+          python3 - <<'PYEOF'
+          import os, json, base64, datetime, hashlib, requests
+          GH='https://api.github.com'
+          H={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'}
+          line=os.environ['LINE']; repo=os.environ['SELF_REPO']
+          now=datetime.datetime.now(datetime.timezone.utc)
+          ts=now.strftime('%FT%TZ')
+          rr=requests.get(f'{GH}/repos/{repo}/actions/runs?per_page=60',headers=H,timeout=20)
+          runs=rr.json().get('workflow_runs',[]) if rr.status_code==200 else []
+          day=[r for r in runs if (now-datetime.datetime.strptime(r['created_at'],'%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=datetime.timezone.utc)).total_seconds()<86400]
+          last=runs[0] if runs else None
+          last_seen=last['created_at'] if last else None
+          last_ok=last and last['conclusion']=='success'
+          age_min=(now-datetime.datetime.strptime(last['created_at'],'%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=datetime.timezone.utc)).total_seconds()/60 if last else 99999
+          state='dark' if not last else ('green' if (last_ok and age_min<360) else ('yellow' if age_min>=360 else 'red'))
+          watch=[w['name'] for w in {r['name']:r for r in runs[:20]}.values()][:6]
+          body={'line':line,'ts':ts,'state':state,'last_seen':last_seen,'runs_per_day':len(day),
+                'watch':watch,'notes':('零 run' if not last else f'末班 {last["name"]} {last["conclusion"]} {round(age_min)}min 前')}
+          body['fp']=hashlib.sha256(json.dumps(body,sort_keys=True,ensure_ascii=False).encode()).hexdigest()[:8]
+          u=f'{GH}/repos/chepin-ai/ci-control/contents/bridge/lines/{line}.json'
+          g=requests.get(u,headers=H,timeout=15)
+          b={'message':f'line-producer {line} {state} [skip ci]','content':base64.b64encode(json.dumps(body,ensure_ascii=False,indent=1).encode()).decode()}
+          if g.status_code==200: b['sha']=g.json()['sha']
+          r=requests.put(u,headers=H,json=b,timeout=20)
+          print('line put:', line, state, r.status_code)
+          PYEOF
+
