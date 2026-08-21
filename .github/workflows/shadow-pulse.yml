@@ -49,4 +49,11 @@ jobs:
           git config user.name "shadow-pulse[bot]"; git config user.email "shadow-pulse@users.noreply.github.com"
           git add weave/pulse pulse.log || true
           git commit -m "pulse $(date -u +%Y%m%d-%H%M%S) $LINE" || echo "无变更"
-          git push
+          # fetch-first 修复（A2 实证：并发班次 push 被拒）——push 前 pull --rebase，失败重试×3
+          ok=0
+          for i in 1 2 3; do
+            git pull --rebase origin main && git push && { ok=1; break; }
+            echo "push 被拒（第 $i 次），rebase 后重试"
+            sleep $((i*5))
+          done
+          [ "$ok" = "1" ] || { echo "::error::push 三连败，留待下一班"; exit 1; }
