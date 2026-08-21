@@ -3,6 +3,9 @@ name: watchdog
 # 边界如实声明：私仓面 Actions 账户级死亡发不了事件，本器只覆公仓面；私仓红态由 P 顺风车扫描+cisbr-ci 只读 App（待 root 裁）补
 on:
   workflow_run:
+    workflows:
+      - "line-producer"
+      - "shadow-pulse"
     types: [completed]
 permissions:
   actions: read
