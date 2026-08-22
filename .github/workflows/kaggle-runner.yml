@@ -1,0 +1,31 @@
+name: kaggle-runner
+on:
+  workflow_dispatch:
+    inputs:
+      probe:
+        description: 'auth-only = 仅认证探针'
+        default: 'auth-only'
+permissions:
+  contents: read
+concurrency:
+  group: kaggle-runner
+  cancel-in-progress: false
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 门闸+双模认证+首验（值永不打印）
+        env:
+          KU: ${{ secrets.API_KAGGLE_CRED_1 }}
+          KK: ${{ secrets.API_KAGGLE_TOKEN_3 }}
+        run: |
+          set -e
+          if [ -z "$KU" ] || [ -z "$KK" ]; then echo "IDLE: Kaggle secrets 未落"; exit 0; fi
+          pip install -q "kaggle>=1.7.4"
+          case "$KK" in
+            KGAT_*) echo "mode=new (KAGGLE_API_TOKEN 通道)"; export KAGGLE_API_TOKEN="$KK";;
+            *) echo "mode=legacy (kaggle.json)"; mkdir -p ~/.kaggle; printf '{"username":"%s","key":"%s"}' "$KU" "$KK" > ~/.kaggle/kaggle.json; chmod 600 ~/.kaggle/kaggle.json;;
+          esac
+          echo "--- auth probe: datasets list -m ---"
+          kaggle datasets list -m --page-size 3 && echo "KAGGLE-AUTH-OK $(date -u +%FT%TZ)"
