@@ -11,23 +11,17 @@ concurrency:
 jobs:
   bench:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 15
     steps:
-      - name: 门闸
-        env:
-          APPK: ${{ secrets.CI_OPS_HUB_KEY }}
-        run: |
-          if [ -z "$APPK" ]; then echo "IDLE: hub key 未落 vci-playground"; exit 0; fi
-          echo "secrets 齐"
-      - name: 取引擎+跑仿真+回写 qlv-lab（值不打印）
+      - name: 作业卡驱动（空队即退，零空转）
         env:
           APPK: ${{ secrets.CI_OPS_HUB_KEY }}
           HUB_ID: ${{ vars.CI_OPS_HUB_ID }}
         run: |
-          [ -n "$APPK" ] || exit 0
+          [ -n "$APPK" ] || { echo "IDLE: hub key 未落"; exit 0; }
           set -e
           printf '%s' "$APPK" > /tmp/hub.pem
-          pip install -q pyjwt cryptography qiskit-aer
+          pip install -q pyjwt cryptography
           cat > /tmp/mint.py <<'PYE'
           import jwt,time,json,urllib.request,os
           now=int(time.time())
@@ -38,25 +32,47 @@ jobs:
           r=urllib.request.Request('https://api.github.com/app/installations/%s/access_tokens'%iid,method='POST',headers=H); r.data=b'{}'
           print(json.loads(urllib.request.urlopen(r).read())['token'])
           PYE
-          IT=$(python3 /tmp/mint.py)
-          rm -f /tmp/hub.pem /tmp/mint.py
+          IT=$(python3 /tmp/mint.py); rm -f /tmp/hub.pem /tmp/mint.py
+          # 轻量预查：空队即退（不装重依赖，零空转）
+          QN=$(curl -s --max-time 20 -H "Authorization: Bearer ${IT}" "https://api.github.com/repos/chepin-ai/qlv-lab/contents/lines/qlv/bench/queue" | python3 -c "import sys,json
+          try: print(len([f for f in json.load(sys.stdin) if f['name'].endswith('.json')]))
+          except Exception: print(0)")
+          echo "queued cards: ${QN}"
+          [ "${QN}" != "0" ] || { echo "QUIET-EXIT 空队"; exit 0; }
+          pip install -q qiskit-aer
+          pip install -q cqlib || echo "cqlib 安装失败（后端卡将标记）"
           git clone -q --depth 1 "https://x-access-token:${IT}@github.com/chepin-ai/qlv-lab.git" /tmp/qlv
           cd /tmp/qlv
           python3 - <<'PYE'
-          import json,datetime
+          import json,os,glob,datetime,traceback
           from qiskit import QuantumCircuit
           from qiskit_aer import AerSimulator
-          qc=QuantumCircuit(3,3); qc.h(0); qc.cx(0,1); qc.cx(1,2); qc.measure([0,1,2],[0,1,2])
-          r=AerSimulator().run(qc,shots=2000).result().get_counts()
-          res={'bench':'GHZ-3 aer','ts':datetime.datetime.now(datetime.UTC).strftime('%Y-%m-%dT%H:%M:%SZ'),'shots':2000,'counts':r,'engine_present':__import__('os').path.exists('lines/qlv/engine/qlv_engine.py')}
-          import os; os.makedirs('lines/qlv/bench',exist_ok=True)
-          fn='lines/qlv/bench/bench-'+res['ts'].replace(':','')+'.json'
-          json.dump(res,open(fn,'w'),ensure_ascii=False,indent=1)
-          print('BENCH-FILE',fn)
+          TS=datetime.datetime.now(datetime.UTC).strftime('%Y-%m-%dT%H:%M:%SZ')
+          os.makedirs('lines/qlv/bench/results',exist_ok=True); os.makedirs('lines/qlv/bench/done',exist_ok=True)
+          for card in sorted(glob.glob('lines/qlv/bench/queue/*.json')):
+              try:
+                  job=json.load(open(card)); jid=job['job_id']
+                  kind=job.get('circuit','ghz'); n=int(job.get('qubits',3)); shots=int(job.get('shots',2000))
+                  if kind=='ghz':
+                      qc=QuantumCircuit(n,n); qc.h(0)
+                      for i in range(n-1): qc.cx(i,i+1)
+                      qc.measure(range(n),range(n))
+                  elif kind=='qasm':
+                      qc=QuantumCircuit.from_qasm_str(job['qasm'])
+                  else:
+                      raise ValueError('unknown circuit '+kind)
+                  r=AerSimulator().run(qc,shots=shots).result().get_counts()
+                  res={'job_id':jid,'ts':TS,'backend':'aer','shots':shots,'counts':r,'ok':True,'note':job.get('note','')}
+              except Exception as e:
+                  res={'job_id':job.get('job_id','?'),'ts':TS,'ok':False,'error':str(e)[:200]}
+                  jid=res['job_id']
+              json.dump(res,open('lines/qlv/bench/results/%s.json'%jid,'w'),ensure_ascii=False,indent=1)
+              os.rename(card,'lines/qlv/bench/done/%s'%os.path.basename(card))
+              print('CARD-DONE',jid,res.get('ok'))
           PYE
           git config user.name 'bench-qlv[bot]'; git config user.email 'bot@users.noreply.github.com'
           git add lines/qlv/bench/
           git diff --cached --quiet && { echo "no change"; exit 0; }
-          git commit -m "bench-qlv: aer 仿真例行（公域 CI 代跑 qlv 外线研究）"
+          git commit -m "bench-qlv: 作业卡执行轮"
           for i in 1 2 3; do git pull --rebase -q origin main 2>/dev/null; git push -q && break; sleep 5; done
           echo "BENCH-OK $(date -u +%FT%TZ)"
