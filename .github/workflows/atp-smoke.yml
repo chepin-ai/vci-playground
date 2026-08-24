@@ -173,7 +173,7 @@ jobs:
           mkdir -p atp/results
           day="$(date -u +%F)"
           if [ -f "/tmp/atp/$day.jsonl" ]; then
-            cp "/tmp/atp/$day.jsonl" "atp/results/$day.jsonl"
+            cat "/tmp/atp/$day.jsonl" >> "atp/results/$day.jsonl"
           else
             printf '{"ts":"%s","engines":{},"overall":"fail","note":"smoke suite did not complete (setup failure)"}\n' \
               "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "atp/results/$day.jsonl"
