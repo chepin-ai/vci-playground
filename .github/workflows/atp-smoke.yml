@@ -104,12 +104,14 @@ jobs:
           echo "===== Mace4 ====="
           mace4_stdout=$(mace4 -f /tmp/atp/group.in) || true
           printf '%s\n' "$mace4_stdout"
-          mace4_out=$(printf '%s\n' "$mace4_stdout" | isofilter 2>&1) || true
+          # banner/head are on stdout in this build; extract model terms for isofilter
+          mace4_models=$(printf '%s\n' "$mace4_stdout" | awk '/^interpretation/{f=1} f{print} f&&/^\]\)\./{exit}')
+          mace4_out=$(printf '%s\n' "$mace4_models" | isofilter 2>&1) || true
           printf '%s\n' "$mace4_out"
           if printf '%s\n' "$mace4_out" | grep -q 'interpretation'; then
             mace4_status=pass
           fi
-          mace4_ver=$(echo "" | mace4 2>&1 >/dev/null | grep -m1 -oiE 'version [0-9][0-9A-Za-z.-]*' | sed 's/^[Vv]ersion //'); mace4_ver=${mace4_ver:-unknown}
+          mace4_ver=$(printf '%s\n' "$mace4_stdout" | grep -m1 -oiE 'version [0-9][0-9A-Za-z.-]*' | sed 's/^[Vv]ersion //'); mace4_ver=${mace4_ver:-unknown}
 
           # ---------------- Prover9: small first-order theorem ----------------
           cat > /tmp/atp/thm.in <<'EOF'
