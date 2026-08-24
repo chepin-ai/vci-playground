@@ -31,6 +31,7 @@ jobs:
           case "$KK" in
             KGAT_*)
               echo "mode=new (KAGGLE_API_TOKEN 通道)"
+              export KAGGLE_API_TOKEN="$KK"
               echo "KAGGLE_API_TOKEN=$KK" >> "$GITHUB_ENV";;
             *)
               echo "mode=legacy (kaggle.json)"
@@ -44,8 +45,16 @@ jobs:
       - name: 推送内核并轮询至完成，取回 out.json
         env:
           KU: ${{ secrets.API_KAGGLE_CRED_1 }}
+          KK: ${{ secrets.API_KAGGLE_TOKEN_3 }}
         run: |
           set -e
+          # 防御性重建认证（GITHUB_ENV 已传递，此处兜底）
+          if [ -z "$KAGGLE_API_TOKEN" ] && [ ! -f ~/.kaggle/kaggle.json ]; then
+            case "$KK" in
+              KGAT_*) export KAGGLE_API_TOKEN="$KK";;
+              *) mkdir -p ~/.kaggle; printf '{"username":"%s","key":"%s"}' "$KU" "$KK" > ~/.kaggle/kaggle.json; chmod 600 ~/.kaggle/kaggle.json;;
+            esac
+          fi
           REF="$(python3 -c "import json;print(json.load(open('kaggle/mc-convergence/kernel-metadata.json'))['id'])")"
           echo "kernel ref: $REF"
           kaggle kernels push -p kaggle/mc-convergence
