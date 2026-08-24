@@ -17,8 +17,8 @@ jobs:
       - uses: actions/create-github-app-token@v1
         id: app
         with:
-          app-id: ${{ secrets.CI_OPS_APP_ID }}
-          private-key: ${{ secrets.CI_OPS_APP_KEY }}
+          app-id: ${{ secrets.AI_FULL_APP_ID }}
+          private-key: ${{ secrets.AI_FULL_APP_KEY }}
           owner: chepin-ai
       - name: ALERT 投快门
         env:
