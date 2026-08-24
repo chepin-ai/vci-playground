@@ -1,0 +1,208 @@
+name: tn-smoke
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [tn-smoke]
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install TN/anneal stack (quimb cotengra autoray tensorly pyqubo dwave-neal)
+        run: |
+          set -e
+          python3 -m pip install --upgrade pip
+          # NOTE: PyPI distribution for the `neal` module is `dwave-neal`
+          python3 -m pip install quimb cotengra autoray tensorly pyqubo dwave-neal
+
+      - name: Run smoke suite (S1 quimb MPS contraction / S2 neal Ising vs brute force)
+        id: smoke
+        run: |
+          mkdir -p /tmp/tn
+          ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          day="$(date -u +%F)"
+
+          # ---------------- S1: quimb 5-site MPS contraction, norm ~= 1 ----------------
+          cat > /tmp/tn/s1_mps.py <<'PY'
+          import importlib.metadata
+          import numpy as np
+          import quimb.tensor as qtn
+          n_sites = 5
+          bond_dim = 4
+          psi = qtn.MPS_rand_state(n_sites, bond_dim=bond_dim, seed=7, tags="s1")
+          psi.normalize()
+          norm2 = (psi.H & psi).contract(all, optimize="auto-hq")  # cotengra path opt via autoray
+          norm = float(np.sqrt(np.real(norm2)))
+          dev = abs(norm - 1.0)
+          assert dev < 1e-8, f"norm {norm} deviates from 1 by {dev}"
+          print(f"sites={n_sites} bond_dim={bond_dim} norm={norm:.12f} dev={dev:.3e}")
+          print("version:", importlib.metadata.version("quimb"))
+          PY
+          s1_status=fail; s1_ver=unknown
+          echo "===== S1 quimb MPS ====="
+          if s1_out=$(python3 /tmp/tn/s1_mps.py 2>&1); then
+            s1_status=pass
+            s1_ver=$(printf '%s\n' "$s1_out" | sed -n 's/^version: //p' | head -1)
+          fi
+          printf '%s\n' "$s1_out"
+          s1_metrics=$(printf '%s\n' "$s1_out" | grep -m1 '^sites=' || true)
+
+          # ---------------- S2: 4-spin Ising chain, neal SA vs brute force ----------------
+          cat > /tmp/tn/s2_ising.py <<'PY'
+          import importlib.metadata
+          import itertools
+          import neal
+          from pyqubo import Spin
+          H_FIELDS = {0: 0.5, 1: -0.3, 2: 0.8, 3: -0.6}
+          J_COUP = {(0, 1): -1.0, (1, 2): 0.7, (2, 3): -0.9}
+          def ising_energy(state):
+              return (sum(H_FIELDS[i] * state[i] for i in H_FIELDS)
+                      + sum(j * state[a] * state[b] for (a, b), j in J_COUP.items()))
+          n = 4
+          spins = {i: Spin(f"s{i}") for i in range(n)}
+          ham = sum(H_FIELDS[i] * spins[i] for i in range(n))
+          for (a, b), j in J_COUP.items():
+              ham += j * spins[a] * spins[b]
+          model = ham.compile()
+          qubo, offset = model.to_qubo()
+          sampler = neal.SimulatedAnnealingSampler()
+          ss = sampler.sample_qubo(qubo, num_reads=1000, seed=42)
+          e_neal = float(ss.first.energy + offset)
+          e_exact = min(
+              ising_energy(dict(zip(range(n), bits)))
+              for bits in itertools.product((-1, 1), repeat=n)
+          )
+          dev = abs(e_neal - e_exact)
+          assert dev < 1e-9, f"neal ground energy {e_neal} != exact {e_exact}"
+          print(f"e_neal={e_neal:.6f} e_exact={e_exact:.6f} dev={dev:.3e}")
+          print("version:", importlib.metadata.version("dwave-neal"))
+          PY
+          s2_status=fail; s2_ver=unknown
+          echo "===== S2 neal Ising ====="
+          if s2_out=$(python3 /tmp/tn/s2_ising.py 2>&1); then
+            s2_status=pass
+            s2_ver=$(printf '%s\n' "$s2_out" | sed -n 's/^version: //p' | head -1)
+          fi
+          printf '%s\n' "$s2_out"
+          s2_metrics=$(printf '%s\n' "$s2_out" | grep -m1 '^e_neal=' || true)
+
+          # ---------------- stack versions ----------------
+          stack_vers=$(python3 - <<'PY'
+          import importlib.metadata, json
+          pkgs = ["quimb", "cotengra", "autoray", "tensorly", "pyqubo", "dwave-neal"]
+          print(json.dumps({p: importlib.metadata.version(p) for p in pkgs}))
+          PY
+          )
+          printf 'stack versions: %s\n' "$stack_vers"
+
+          # ---------------- aggregate ----------------
+          TS="$ts" DAY="$day" \
+          S1_STATUS="$s1_status" S1_VER="$s1_ver" S1_METRICS="$s1_metrics" \
+          S2_STATUS="$s2_status" S2_VER="$s2_ver" S2_METRICS="$s2_metrics" \
+          STACK_VERS="$stack_vers" \
+          python3 - <<'PY'
+          import json, os
+          rec = {
+            "ts": os.environ["TS"],
+            "lab": "tn-lab",
+            "cases": {
+              "s1_mps_contraction": {"status": os.environ["S1_STATUS"], "version": os.environ["S1_VER"],
+                                     "metrics": os.environ["S1_METRICS"]},
+              "s2_ising_anneal":    {"status": os.environ["S2_STATUS"], "version": os.environ["S2_VER"],
+                                     "metrics": os.environ["S2_METRICS"]},
+            },
+            "versions": json.loads(os.environ["STACK_VERS"]),
+          }
+          rec["overall"] = "pass" if all(c["status"] == "pass" for c in rec["cases"].values()) else "fail"
+          with open("/tmp/tn/results.json", "w") as f:
+            json.dump(rec, f, indent=2)
+          with open(f"/tmp/tn/{os.environ['DAY']}.jsonl", "a") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+          print(json.dumps(rec, indent=2))
+          PY
+
+      - name: Mint GitHub App token (push + issue comment)
+        id: app
+        if: always()
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.ATP_APP_ID }}
+          private-key: ${{ secrets.ATP_APP_PEM }}
+
+      - name: Publish results to tn/results/ (skip ci)
+        if: always()
+        run: |
+          set -e
+          mkdir -p tn/results
+          day="$(date -u +%F)"
+          if [ -f "/tmp/tn/$day.jsonl" ]; then
+            cat "/tmp/tn/$day.jsonl" >> "tn/results/$day.jsonl"
+          else
+            printf '{"ts":"%s","lab":"tn-lab","cases":{},"overall":"fail","note":"smoke suite did not complete (setup failure)"}\n' \
+              "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "tn/results/$day.jsonl"
+          fi
+          git config user.name "tn-lab[bot]"
+          git config user.email "tn-lab[bot]@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${{ steps.app.outputs.token }}@github.com/${{ github.repository }}.git"
+          # actions/checkout persists GITHUB_TOKEN via http extraheader which overrides URL creds
+          git config --unset-all http.https://github.com/.extraheader || true
+          git add tn/results/
+          git commit -m "tn-lab: smoke results $day [skip ci]" || echo "nothing to commit"
+          git push origin HEAD:main
+
+      - name: Evaluate result; comment failure summary to issue; fail run on any case failure
+        if: always()
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: |
+          mkdir -p /tmp/tn
+          if [ ! -f /tmp/tn/results.json ]; then
+            echo '{"ts":"'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'","lab":"tn-lab","cases":{},"overall":"fail","note":"smoke suite did not complete (setup failure)"}' > /tmp/tn/results.json
+          fi
+          overall=$(python3 -c "import json;print(json.load(open('/tmp/tn/results.json'))['overall'])")
+          if [ "$overall" = "pass" ]; then
+            echo "TN-LAB smoke: PASS (all cases)"
+            exit 0
+          fi
+          echo "::error::TN-LAB smoke failed"
+          repo="${{ github.repository }}"
+          api="https://api.github.com/repos/$repo"
+          num=1
+          code=$(curl -s -o /tmp/tn/issue1.json -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" "$api/issues/1")
+          if [ "$code" != "200" ]; then
+            num=$(curl -s -X POST \
+              -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              -d '{"title":"ATP-LAB 日志","body":"ATP-LAB / TN-LAB 冒烟运行日志与失败摘要（本 issue 由 *-smoke workflow 自动维护）。"}' \
+              "$api/issues" | python3 -c "import sys,json;print(json.load(sys.stdin)['number'])") || num=1
+          fi
+          python3 - "$repo" "$num" <<'PY'
+          import json, os, sys, urllib.request
+          repo, num = sys.argv[1], sys.argv[2]
+          rec = json.load(open("/tmp/tn/results.json"))
+          fails = [k for k, v in rec.get("cases", {}).items() if v.get("status") != "pass"]
+          if not rec.get("cases"):
+              fails = ["<setup>"]
+          body = ("TN-LAB 冒烟失败 @ " + rec.get("ts", "?") +
+                  "\n\n失败用例: " + ", ".join(fails) +
+                  "\n\n```json\n" + json.dumps(rec, indent=2, ensure_ascii=False) + "\n```")
+          req = urllib.request.Request(
+              f"https://api.github.com/repos/{repo}/issues/{num}/comments",
+              data=json.dumps({"body": body}).encode(), method="POST",
+              headers={"Authorization": "Bearer " + os.environ["GH_TOKEN"],
+                       "Accept": "application/vnd.github+json",
+                       "X-GitHub-Api-Version": "2022-11-28",
+                       "Content-Type": "application/json"})
+          urllib.request.urlopen(req, timeout=30).read()
+          print(f"failure summary commented on issue #{num}")
+          PY
+          exit 1
