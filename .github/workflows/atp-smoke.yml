@@ -22,11 +22,13 @@ jobs:
           set -e
           sudo apt-get update -qq
           if ! sudo apt-get install -y --no-install-recommends prover9; then
-            echo "::warning::apt prover9 unavailable, falling back to LADR 2009-11A source build"
+            echo "::warning::apt prover9 unavailable (not in noble), falling back to LADR 2009-11A source build"
             mkdir -p /tmp/ladr && cd /tmp/ladr
             curl -fsSL -o LADR.tar.gz https://www.cs.unm.edu/~mccune/prover9/download/LADR-2009-11A.tar.gz
             tar xzf LADR.tar.gz
             cd LADR-2009-11A
+            # fix link order: -lm must come after objects/libladr.a (undefined reference to `round` otherwise)
+            find . -name Makefile -exec sed -i 's|libladr\.a|libladr.a -lm|g' {} +
             make all
             sudo cp bin/prover9 bin/mace4 bin/isofilter /usr/local/bin/
             cd "$GITHUB_WORKSPACE"
@@ -176,6 +178,8 @@ jobs:
           git config user.name "atp-lab[bot]"
           git config user.email "atp-lab[bot]@users.noreply.github.com"
           git remote set-url origin "https://x-access-token:${{ steps.app.outputs.token }}@github.com/${{ github.repository }}.git"
+          # actions/checkout persists GITHUB_TOKEN via http extraheader which overrides URL creds
+          git config --unset-all http.https://github.com/.extraheader || true
           git add atp/results/
           git commit -m "atp-lab: smoke results $day [skip ci]" || echo "nothing to commit"
           git push origin HEAD:main
