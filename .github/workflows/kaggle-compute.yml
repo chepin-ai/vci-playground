@@ -1,0 +1,137 @@
+name: kaggle-compute
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [kaggle-compute]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kaggle-compute
+  cancel-in-progress: false
+
+jobs:
+  compute:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: 门闸+双模认证+探针（值永不打印）
+        env:
+          KU: ${{ secrets.API_KAGGLE_CRED_1 }}
+          KK: ${{ secrets.API_KAGGLE_TOKEN_3 }}
+        run: |
+          set -e
+          if [ -z "$KU" ] || [ -z "$KK" ]; then echo "IDLE: Kaggle secrets 未落"; exit 1; fi
+          pip install -q "kaggle>=1.7.4"
+          case "$KK" in
+            KGAT_*)
+              echo "mode=new (KAGGLE_API_TOKEN 通道)"
+              echo "KAGGLE_API_TOKEN=$KK" >> "$GITHUB_ENV";;
+            *)
+              echo "mode=legacy (kaggle.json)"
+              mkdir -p ~/.kaggle
+              printf '{"username":"%s","key":"%s"}' "$KU" "$KK" > ~/.kaggle/kaggle.json
+              chmod 600 ~/.kaggle/kaggle.json;;
+          esac
+          echo "--- auth probe: datasets list -m ---"
+          kaggle datasets list -m --page-size 3 && echo "KAGGLE-AUTH-OK $(date -u +%FT%TZ)"
+
+      - name: 推送内核并轮询至完成，取回 out.json
+        env:
+          KU: ${{ secrets.API_KAGGLE_CRED_1 }}
+        run: |
+          set -e
+          REF="$(python3 -c "import json;print(json.load(open('kaggle/mc-convergence/kernel-metadata.json'))['id'])")"
+          echo "kernel ref: $REF"
+          kaggle kernels push -p kaggle/mc-convergence
+          echo "--- poll kernels status ---"
+          ok=0
+          for i in $(seq 1 85); do
+            line="$(kaggle kernels status "$REF" 2>&1 || true)"
+            echo "[$i] $line"
+            up="$(printf '%s' "$line" | tr 'a-z' 'A-Z')"
+            case "$up" in
+              *COMPLETE*) ok=1; break;;
+              *ERROR*|*CANCEL*|*FAILED*) echo "::error::kernel run failed: $line"; exit 1;;
+            esac
+            sleep 20
+          done
+          if [ "$ok" != "1" ]; then echo "::error::kernel status poll timeout"; exit 1; fi
+          echo "--- fetch kernel output ---"
+          rm -rf /tmp/kout && mkdir -p /tmp/kout
+          kaggle kernels output "$REF" -p /tmp/kout
+          ls -la /tmp/kout
+          test -f /tmp/kout/out.json || { echo "::error::out.json missing in kernel output"; exit 1; }
+
+      - name: 校验结果达标（收敛宪章 + 可复现随机性 + NW toy）
+        run: |
+          set -e
+          python3 - <<'PY'
+          import json, sys
+          out = json.load(open("/tmp/kout/out.json"))
+          errs = []
+          groups = {g["name"]: g for g in out["part_a_mc_groups"]}
+          for name in ("rho_sub_gated", "rho_near1_gated"):
+              g = groups[name]
+              if g["params"]["rho"] >= 1: errs.append(f"{name}: rho>=1")
+              if g["stop_rate"]["mean"] < 0.95: errs.append(f"{name}: stop_rate {g['stop_rate']['mean']} < 0.95")
+              if abs(g["regret_slope"]["mean"]) >= 1.0: errs.append(f"{name}: regret_slope {g['regret_slope']['mean']} 非有界")
+          c = groups["rho_super_control"]
+          if c["params"]["rho"] < 1: errs.append("control: rho<1")
+          if c["regret_slope"]["mean"] <= 1.0: errs.append(f"control: regret_slope {c['regret_slope']['mean']} 未爆炸")
+          if c["pool_len"]["final_mean"] <= 100: errs.append(f"control: final pool {c['pool_len']['final_mean']} 未爆炸")
+          b = out["part_b_chain_prng"]
+          if not b["schedule_repro"]["identical"]: errs.append("PRNG 调度序列两次不一致")
+          nw = b["nw_toy"]
+          if len(nw["pr_output_bits"]) != 32: errs.append("NW 输出非 32 比特")
+          ac = nw["autocorr_lag1_16"]
+          if max(abs(v) for v in ac.values()) >= 0.05: errs.append(f"NW 自相关异常: {ac}")
+          for g in out["part_a_mc_groups"]:
+              print(f"[check] {g['name']}: rho={g['params']['rho']} stop={g['stop_rate']['mean']} "
+                    f"slope={g['regret_slope']['mean']} verdict={g['verdict']}")
+          print(f"[check] repro={b['schedule_repro']['identical']} nw_hex={nw['pr_output_hex']}")
+          if errs:
+              print("::error::" + "; ".join(errs))
+              sys.exit(1)
+          print("RESULT-CHECK-OK")
+          PY
+
+      - name: Mint GitHub App token (push back)
+        id: app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.ATP_APP_ID }}
+          private-key: ${{ secrets.ATP_APP_PEM }}
+
+      - name: 回写 kaggle/results/（skip ci）
+        run: |
+          set -e
+          mkdir -p kaggle/results
+          RUN_ID="${{ github.run_id }}" RUN_NUMBER="${{ github.run_number }}"           RUN_TS="$(date -u +%FT%TZ)"           python3 - <<'PY'
+          import json, os
+          out = json.load(open("/tmp/kout/out.json"))
+          rec = {
+              "workflow": "kaggle-compute",
+              "run_id": int(os.environ["RUN_ID"]),
+              "run_number": int(os.environ["RUN_NUMBER"]),
+              "ts": os.environ["RUN_TS"],
+              "kernel_ref": json.load(open("kaggle/mc-convergence/kernel-metadata.json"))["id"],
+              "result": out,
+          }
+          with open("kaggle/results/mc-convergence-out.json", "w", encoding="utf-8") as f:
+              json.dump(rec, f, ensure_ascii=False, indent=1)
+          print("kaggle/results/mc-convergence-out.json written")
+          PY
+          git config user.name "atp-lab[bot]"
+          git config user.email "atp-lab[bot]@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${{ steps.app.outputs.token }}@github.com/${{ github.repository }}.git"
+          # actions/checkout persists GITHUB_TOKEN via http extraheader which overrides URL creds
+          git config --unset-all http.https://github.com/.extraheader || true
+          git add kaggle/results/
+          git commit -m "kaggle-compute: mc-convergence out.json run ${{ github.run_id }} [skip ci]" || echo "nothing to commit"
+          git push origin HEAD:main
