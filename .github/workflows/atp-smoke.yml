@@ -189,6 +189,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
         run: |
+          mkdir -p /tmp/atp
           if [ ! -f /tmp/atp/results.json ]; then
             echo '{"ts":"'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'","engines":{},"overall":"fail","note":"smoke suite did not complete (setup failure)"}' > /tmp/atp/results.json
           fi
