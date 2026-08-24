@@ -1,0 +1,171 @@
+{
+ "workflow": "kaggle-compute",
+ "run_id": 32704707537,
+ "run_number": 2,
+ "ts": "2026-08-24T08:08:08Z",
+ "kernel_ref": "chepin163net/mc-convergence",
+ "result": {
+  "kernel": "mc-convergence",
+  "spec": "mc-convergence-charter/v1",
+  "epochs": 200,
+  "repeats": 50,
+  "part_a_mc_groups": [
+   {
+    "name": "rho_sub_gated",
+    "params": {
+     "lambda": 2.0,
+     "beta_bar": 10.0,
+     "B": 30.0,
+     "eps": 0.5,
+     "K_max": 32,
+     "rho": 0.6667,
+     "epochs": 200,
+     "repeats": 50
+    },
+    "pool_len": {
+     "mean": 2.773,
+     "p50": 2.0,
+     "p90": 7.0,
+     "p99": 14.0,
+     "max": 24,
+     "final_mean": 2.64
+    },
+    "stop_rate": {
+     "mean": 0.9935,
+     "min": 0.9725
+    },
+    "regret_slope": {
+     "mean": 0.0134,
+     "sd": 0.1959
+    },
+    "verdict": "bounded+stopped"
+   },
+   {
+    "name": "rho_near1_gated",
+    "params": {
+     "lambda": 3.0,
+     "beta_bar": 10.0,
+     "B": 33.0,
+     "eps": 0.5,
+     "K_max": 64,
+     "rho": 0.9091,
+     "epochs": 200,
+     "repeats": 50
+    },
+    "pool_len": {
+     "mean": 11.8,
+     "p50": 10.0,
+     "p90": 24.0,
+     "p99": 45.0,
+     "max": 62,
+     "final_mean": 11.16
+    },
+    "stop_rate": {
+     "mean": 0.9814,
+     "min": 0.9503
+    },
+    "regret_slope": {
+     "mean": 0.2938,
+     "sd": 0.6468
+    },
+    "verdict": "bounded+stopped"
+   },
+   {
+    "name": "rho_super_control",
+    "params": {
+     "lambda": 4.0,
+     "beta_bar": 12.0,
+     "B": 40.0,
+     "eps": 0.5,
+     "K_max": "none(无门禁)",
+     "rho": 1.2,
+     "epochs": 200,
+     "repeats": 50
+    },
+    "pool_len": {
+     "mean": 75.188,
+     "p50": 75.0,
+     "p90": 133.0,
+     "p99": 166.0,
+     "max": 212,
+     "final_mean": 135.52
+    },
+    "stop_rate": {
+     "mean": 0.8323,
+     "min": 0.7611
+    },
+    "regret_slope": {
+     "mean": 8.0603,
+     "sd": 2.247
+    },
+    "verdict": "explosion(control)"
+   }
+  ],
+  "part_b_chain_prng": {
+   "chain_tip_material": "usrm-outbox chain tip 占位串",
+   "chain_seed_hex": "c97146fc4e8bdb87",
+   "schedule_repro": {
+    "identical": true,
+    "schedule_sha256": "23e4187f4cbf8bc2f5fade2cb5ca0ad33034447cb0d21ec448b7579008b29f37",
+    "schedule": {
+     "order": [
+      1,
+      6,
+      0,
+      2,
+      5,
+      7,
+      3,
+      4
+     ],
+     "quotas": [
+      5,
+      2,
+      6,
+      4,
+      8,
+      5,
+      3,
+      6
+     ]
+    }
+   },
+   "nw_toy": {
+    "hard_function": "parity",
+    "design": {
+     "d": 8,
+     "l": 4,
+     "a_target": 1,
+     "m": 32,
+     "a_achieved": 3,
+     "max_intersection": 3,
+     "mean_intersection": 1.9556,
+     "note": "d=8,l=4: 严格 a<=1 至多 m=C(8,2)/C(4,2)=4 组; a<=2 至多 14 组 (常重码 A(8,4,4)=14); 故 m=32 时 max 交集 3 已为数学下界, 贪心构造达成该下界并如实报告"
+    },
+    "expansion": "8bit -> 32bit (4x)",
+    "demo_seed_byte_hex": "3a",
+    "pr_output_hex": "03ff2063",
+    "pr_output_bits": "00000011111111110010000001100011",
+    "balance_mean_pm1": 0.0,
+    "autocorr_lag1_16": {
+     "1": -0.00012,
+     "2": 0.00073,
+     "3": -0.00183,
+     "4": 0.00049,
+     "5": -0.00159,
+     "6": 0.0022,
+     "7": -0.00086,
+     "8": 0.00098,
+     "9": -0.00012,
+     "10": -0.00024,
+     "11": 0.00306,
+     "12": -0.00098,
+     "13": 0.00868,
+     "14": -0.00318,
+     "15": -0.00281,
+     "16": 0.00294
+    }
+   }
+  }
+ }
+}
