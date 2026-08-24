@@ -1,0 +1,230 @@
+name: atp-smoke
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "23 4 * * *"
+  repository_dispatch:
+    types: [atp-smoke]
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install ATP engines (prover9/mace4 via apt, z3-solver + cvc5 via pip)
+        run: |
+          set -e
+          sudo apt-get update -qq
+          if ! sudo apt-get install -y --no-install-recommends prover9; then
+            echo "::warning::apt prover9 unavailable, falling back to LADR 2009-11A source build"
+            mkdir -p /tmp/ladr && cd /tmp/ladr
+            curl -fsSL -o LADR.tar.gz https://www.cs.unm.edu/~mccune/prover9/download/LADR-2009-11A.tar.gz
+            tar xzf LADR.tar.gz
+            cd LADR-2009-11A
+            make all
+            sudo cp bin/prover9 bin/mace4 bin/isofilter /usr/local/bin/
+            cd "$GITHUB_WORKSPACE"
+          fi
+          command -v prover9 mace4 isofilter
+          python3 -m pip install --upgrade pip
+          python3 -m pip install z3-solver cvc5
+
+      - name: Run smoke suite (Z3 / cvc5 / Mace4 / Prover9)
+        id: smoke
+        run: |
+          mkdir -p /tmp/atp
+          ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          day="$(date -u +%F)"
+
+          # ---------------- Z3: 3-var SAT + model ----------------
+          cat > /tmp/atp/z3_smoke.py <<'PY'
+          import z3
+          a, b, c = z3.Bools('a b c')
+          s = z3.Solver()
+          s.add(z3.Or(a, b))
+          s.add(z3.Or(z3.Not(a), c))
+          s.add(z3.Or(z3.Not(b), z3.Not(c)))
+          r = s.check()
+          assert str(r) == 'sat', f'expected sat, got {r}'
+          print('model:', s.model())
+          print('version:', z3.get_version_string())
+          PY
+          z3_status=fail; z3_ver=unknown
+          echo "===== Z3 ====="
+          if z3_out=$(python3 /tmp/atp/z3_smoke.py 2>&1); then
+            z3_status=pass
+            z3_ver=$(printf '%s\n' "$z3_out" | sed -n 's/^version: //p' | head -1)
+          fi
+          printf '%s\n' "$z3_out"
+
+          # ---------------- cvc5: QF_LIA ----------------
+          cat > /tmp/atp/cvc5_smoke.py <<'PY'
+          import importlib.metadata
+          import cvc5
+          from cvc5 import Kind
+          s = cvc5.Solver()
+          s.setLogic('QF_LIA')
+          i = s.getIntegerSort()
+          x = s.mkConst(i, 'x')
+          y = s.mkConst(i, 'y')
+          s.assertFormula(s.mkTerm(Kind.EQUAL, s.mkTerm(Kind.ADD, x, y), s.mkInteger(10)))
+          s.assertFormula(s.mkTerm(Kind.EQUAL, s.mkTerm(Kind.SUB, x, y), s.mkInteger(2)))
+          r = s.checkSat()
+          assert r.isSat(), f'expected sat, got {r}'
+          print('model: x =', s.getValue(x), ', y =', s.getValue(y))
+          print('version:', importlib.metadata.version('cvc5'))
+          PY
+          cvc5_status=fail; cvc5_ver=unknown
+          echo "===== cvc5 ====="
+          if cvc5_out=$(python3 /tmp/atp/cvc5_smoke.py 2>&1); then
+            cvc5_status=pass
+            cvc5_ver=$(printf '%s\n' "$cvc5_out" | sed -n 's/^version: //p' | head -1)
+          fi
+          printf '%s\n' "$cvc5_out"
+
+          # ---------------- Mace4: group axioms, order-2 finite model, isofilter ----------------
+          cat > /tmp/atp/group.in <<'EOF'
+          assign(domain_size, 2).
+          formulas(assumptions).
+            (x * y) * z = x * (y * z).
+            e * x = x.
+            x * i(x) = e.
+          end_of_list.
+          EOF
+          mace4_status=fail
+          echo "===== Mace4 ====="
+          mace4_out=$(mace4 -f /tmp/atp/group.in 2>&1 | isofilter 2>&1) || true
+          printf '%s\n' "$mace4_out"
+          if printf '%s\n' "$mace4_out" | grep -q 'interpretation'; then
+            mace4_status=pass
+          fi
+          mace4_ver=$(dpkg-query -W -f='${Version}' prover9 2>/dev/null || true)
+          [ -n "$mace4_ver" ] || mace4_ver=$(printf '%s\n' "$mace4_out" | grep -m1 -oiE 'version [0-9][0-9A-Za-z.-]*' || echo unknown)
+
+          # ---------------- Prover9: small first-order theorem ----------------
+          cat > /tmp/atp/thm.in <<'EOF'
+          formulas(assumptions).
+            (x * y) * z = x * (y * z).
+            e * x = x.
+            x * i(x) = e.
+          end_of_list.
+          formulas(goals).
+            x * e = x.
+          end_of_list.
+          EOF
+          prover9_status=fail
+          echo "===== Prover9 ====="
+          prover9_out=$(prover9 -f /tmp/atp/thm.in 2>&1) || true
+          printf '%s\n' "$prover9_out" | tail -40
+          if printf '%s\n' "$prover9_out" | grep -q 'THEOREM PROVED'; then
+            prover9_status=pass
+          fi
+          prover9_ver=$(dpkg-query -W -f='${Version}' prover9 2>/dev/null || true)
+          [ -n "$prover9_ver" ] || prover9_ver=$(printf '%s\n' "$prover9_out" | grep -m1 -oiE 'version [0-9][0-9A-Za-z.-]*' || echo unknown)
+
+          # ---------------- aggregate ----------------
+          TS="$ts" DAY="$day" \
+          Z3_STATUS="$z3_status" Z3_VER="$z3_ver" \
+          CVC5_STATUS="$cvc5_status" CVC5_VER="$cvc5_ver" \
+          MACE4_STATUS="$mace4_status" MACE4_VER="$mace4_ver" \
+          PROVER9_STATUS="$prover9_status" PROVER9_VER="$prover9_ver" \
+          python3 - <<'PY'
+          import json, os
+          rec = {
+            "ts": os.environ["TS"],
+            "engines": {
+              "z3":      {"status": os.environ["Z3_STATUS"],      "version": os.environ["Z3_VER"]},
+              "cvc5":    {"status": os.environ["CVC5_STATUS"],    "version": os.environ["CVC5_VER"]},
+              "mace4":   {"status": os.environ["MACE4_STATUS"],   "version": os.environ["MACE4_VER"]},
+              "prover9": {"status": os.environ["PROVER9_STATUS"], "version": os.environ["PROVER9_VER"]},
+            },
+          }
+          rec["overall"] = "pass" if all(e["status"] == "pass" for e in rec["engines"].values()) else "fail"
+          with open("/tmp/atp/results.json", "w") as f:
+            json.dump(rec, f, indent=2)
+          with open(f"/tmp/atp/{os.environ['DAY']}.jsonl", "a") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+          print(json.dumps(rec, indent=2))
+          PY
+
+      - name: Mint GitHub App token (push + issue comment)
+        id: app
+        if: always()
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.ATP_APP_ID }}
+          private-key: ${{ secrets.ATP_APP_PEM }}
+
+      - name: Publish results to atp/results/ (skip ci)
+        if: always()
+        run: |
+          set -e
+          mkdir -p atp/results
+          day="$(date -u +%F)"
+          if [ -f "/tmp/atp/$day.jsonl" ]; then
+            cp "/tmp/atp/$day.jsonl" "atp/results/$day.jsonl"
+          else
+            printf '{"ts":"%s","engines":{},"overall":"fail","note":"smoke suite did not complete (setup failure)"}\n' \
+              "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "atp/results/$day.jsonl"
+          fi
+          git config user.name "atp-lab[bot]"
+          git config user.email "atp-lab[bot]@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${{ steps.app.outputs.token }}@github.com/${{ github.repository }}.git"
+          git add atp/results/
+          git commit -m "atp-lab: smoke results $day [skip ci]" || echo "nothing to commit"
+          git push origin HEAD:main
+
+      - name: Evaluate result; comment failure summary to issue; fail run on any engine failure
+        if: always()
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: |
+          if [ ! -f /tmp/atp/results.json ]; then
+            echo '{"ts":"'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'","engines":{},"overall":"fail","note":"smoke suite did not complete (setup failure)"}' > /tmp/atp/results.json
+          fi
+          overall=$(python3 -c "import json;print(json.load(open('/tmp/atp/results.json'))['overall'])")
+          if [ "$overall" = "pass" ]; then
+            echo "ATP-LAB smoke: PASS (all engines)"
+            exit 0
+          fi
+          echo "::error::ATP-LAB smoke failed"
+          repo="${{ github.repository }}"
+          api="https://api.github.com/repos/$repo"
+          num=1
+          code=$(curl -s -o /tmp/atp/issue1.json -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" "$api/issues/1")
+          if [ "$code" != "200" ]; then
+            num=$(curl -s -X POST \
+              -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              -d '{"title":"ATP-LAB 日志","body":"ATP-LAB 冒烟运行日志与失败摘要（本 issue 由 atp-smoke workflow 自动维护）。"}' \
+              "$api/issues" | python3 -c "import sys,json;print(json.load(sys.stdin)['number'])") || num=1
+          fi
+          python3 - "$repo" "$num" <<'PY'
+          import json, os, sys, urllib.request
+          repo, num = sys.argv[1], sys.argv[2]
+          rec = json.load(open("/tmp/atp/results.json"))
+          fails = [k for k, v in rec.get("engines", {}).items() if v.get("status") != "pass"]
+          if not rec.get("engines"):
+            fails = ["<setup>"]
+          body = ("ATP-LAB 冒烟失败 @ " + rec.get("ts", "?") +
+                  "\n\n失败引擎: " + ", ".join(fails) +
+                  "\n\n```json\n" + json.dumps(rec, indent=2, ensure_ascii=False) + "\n```")
+          req = urllib.request.Request(
+              f"https://api.github.com/repos/{repo}/issues/{num}/comments",
+              data=json.dumps({"body": body}).encode(), method="POST",
+              headers={"Authorization": "Bearer " + os.environ["GH_TOKEN"],
+                       "Accept": "application/vnd.github+json",
+                       "X-GitHub-Api-Version": "2022-11-28",
+                       "Content-Type": "application/json"})
+          urllib.request.urlopen(req, timeout=30).read()
+          print(f"failure summary commented on issue #{num}")
+          PY
+          exit 1
