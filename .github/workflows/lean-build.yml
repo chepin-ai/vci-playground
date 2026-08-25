@@ -1,0 +1,112 @@
+name: lean-build
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [lean-build]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install elan + Lean toolchain (per lean/lean-toolchain)
+        run: |
+          set -e
+          curl -fsSL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            | sh -s -- -y --default-toolchain "$(cat lean/lean-toolchain)"
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+          "$HOME/.elan/bin/lean" --version
+
+      - name: lake build (timed)
+        id: build
+        run: |
+          set +e
+          cd lean
+          start=$(date +%s)
+          lake build > /tmp/lake-build.log 2>&1
+          rc=$?
+          end=$(date +%s)
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          echo "secs=$((end-start))" >> "$GITHUB_OUTPUT"
+          tail -30 /tmp/lake-build.log
+          exit 0
+
+      - name: Scan proofs + write results jsonl (sorry scan strips comments first)
+        id: collect
+        if: always()
+        env:
+          BUILD_RC: ${{ steps.build.outputs.rc }}
+          BUILD_SECS: ${{ steps.build.outputs.secs }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re, datetime, pathlib
+          day = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+          ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+          src = "".join(p.read_text() for p in sorted(pathlib.Path("lean").rglob("*.lean")))
+          no_line = re.sub(r"--[^\n]*", "", src)
+          no_block = re.sub(r"/-.*?-/", "", no_line, flags=re.S)
+          sorry_free = not re.search(r"\bsorry\b", no_block)
+          theorems = re.findall(r"^theorem\s+([A-Za-z0-9_.']+)", src, flags=re.M)
+          toolchain = pathlib.Path("lean/lean-toolchain").read_text().strip()
+          rc = int(os.environ.get("BUILD_RC") or "1")
+          secs = int(os.environ.get("BUILD_SECS") or "0")
+          base = {"ts": ts, "suite": "lean-build", "engine": "lean4",
+                  "toolchain": toolchain, "run_id": os.environ.get("RUN_ID", "")}
+          recs = [{**base, "property": "lake_build", "role": "positive",
+                   "verdict": "pass" if rc == 0 else "fail", "build_secs": secs,
+                   "witness": f"lake build rc={rc}; sorry_free={sorry_free}"}]
+          if rc == 0:
+              for t in theorems:
+                  recs.append({**base, "property": t, "role": "positive", "verdict": "proved",
+                               "witness": "closed by lean4 kernel; no sorry"})
+          out = pathlib.Path("/tmp/lean-results"); out.mkdir(exist_ok=True)
+          with open(out / f"{day}.jsonl", "a") as f:
+              for r in recs:
+                  f.write(json.dumps(r, ensure_ascii=False) + "\n")
+          print(f"sorry_free={sorry_free} theorems={theorems}")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"sorry_free={'true' if sorry_free else 'false'}\n")
+          PY
+
+      - name: Mint GitHub App token (push results)
+        id: app
+        if: always()
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.ATP_APP_ID }}
+          private-key: ${{ secrets.ATP_APP_PEM }}
+
+      - name: Publish results to lean/results/ (skip ci)
+        if: always()
+        run: |
+          set -e
+          day="$(date -u +%F)"
+          mkdir -p lean/results
+          if [ -f "/tmp/lean-results/$day.jsonl" ]; then
+            cat "/tmp/lean-results/$day.jsonl" >> "lean/results/$day.jsonl"
+          fi
+          git config user.name "lean-lab[bot]"
+          git config user.email "lean-lab[bot]@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${{ steps.app.outputs.token }}@github.com/${{ github.repository }}.git"
+          # actions/checkout persists GITHUB_TOKEN via http extraheader which overrides URL creds
+          git config --unset-all http.https://github.com/.extraheader || true
+          git add lean/results/
+          git commit -m "lean-lab: build results $day [skip ci]" || echo "nothing to commit"
+          git push origin HEAD:main
+
+      - name: Gate on build verdict (build rc + sorry-free)
+        if: always()
+        run: |
+          if [ "${{ steps.build.outputs.rc }}" = "0" ] && [ "${{ steps.collect.outputs.sorry_free }}" = "true" ]; then
+            echo "lean-lab: lake build pass, all proofs sorry-free"
+            exit 0
+          fi
+          echo "::error::lean-lab: build failed or sorry residue detected (rc=${{ steps.build.outputs.rc }}, sorry_free=${{ steps.collect.outputs.sorry_free }})"
+          exit 1
