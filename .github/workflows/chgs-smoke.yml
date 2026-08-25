@@ -1,0 +1,103 @@
+name: chgs-smoke
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [chgs-smoke]
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Mint GitHub App token (read vci-usrm sources + push results)
+        id: app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.ATP_APP_ID }}
+          private-key: ${{ secrets.ATP_APP_PEM }}
+
+      - name: Install CC/spectral stack (toponetx networkx numpy)
+        run: |
+          set -e
+          python3 -m pip install --upgrade pip
+          # toponetx pip-installs cleanly (0.4.0); cc_build.py falls back to
+          # self-built rank structures if it ever becomes uninstallable.
+          python3 -m pip install toponetx networkx numpy
+
+      - name: Fetch vci-usrm sources (roadmap + obligation ledger, L0 public ids only)
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: |
+          set -e
+          mkdir -p /tmp/chgs
+          api="https://api.github.com/repos/chepin-ai/vci-usrm/contents"
+          for f in ure/roadmap.json ure/obligations.jsonl; do
+            code=$(curl -s -o "/tmp/chgs/$(basename "$f")" -w '%{http_code}' \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github.raw" \
+              -H "X-GitHub-Api-Version: 2022-11-28" "$api/$f")
+            [ "$code" = "200" ] || { echo "::error::fetch $f -> HTTP $code"; exit 1; }
+          done
+          wc -c /tmp/chgs/roadmap.json /tmp/chgs/obligations.jsonl
+
+      - name: Run CHGS smoke (S1 CC skeleton / S2 L0 spectrum + rank-3 SVD / S3 verdict)
+        id: smoke
+        run: |
+          set -e
+          ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          day="$(date -u +%F)"
+          echo "day=$day" >> "$GITHUB_OUTPUT"
+          python3 chgs/cc_build.py \
+            --roadmap /tmp/chgs/roadmap.json \
+            --obligations /tmp/chgs/obligations.jsonl \
+            --out-jsonl "/tmp/chgs/$day.jsonl" \
+            --out-summary /tmp/chgs/results.json \
+            --ts "$ts"
+
+      - name: Publish results to chgs/results/ (skip ci)
+        if: always()
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: |
+          set -e
+          mkdir -p chgs/results
+          day="$(date -u +%F)"
+          if [ -f "/tmp/chgs/$day.jsonl" ]; then
+            cat "/tmp/chgs/$day.jsonl" >> "chgs/results/$day.jsonl"
+          else
+            printf '{"ts":"%s","lab":"chgs-lab","type":"chgs_residual","cases":{},"overall":"fail","note":"smoke suite did not complete (setup failure)"}\n' \
+              "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "chgs/results/$day.jsonl"
+          fi
+          git config user.name "chgs-lab[bot]"
+          git config user.email "chgs-lab[bot]@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
+          # actions/checkout persists GITHUB_TOKEN via http extraheader which overrides URL creds
+          git config --unset-all http.https://github.com/.extraheader || true
+          git add chgs/results/
+          git commit -m "chgs-lab: smoke results $day [skip ci]" || echo "nothing to commit"
+          git push origin HEAD:main
+
+      - name: Evaluate verdict (residual is a data outcome, not an infra failure)
+        if: always()
+        run: |
+          if [ ! -f /tmp/chgs/results.json ]; then
+            echo "::error::CHGS smoke produced no record (setup/compute failure)"
+            exit 1
+          fi
+          python3 - <<'PY'
+          import json
+          rec = json.load(open("/tmp/chgs/results.json"))
+          v = rec.get("verdict", {})
+          print(f"type={rec.get('type')} overall={rec.get('overall')} reasons={v.get('reasons')}")
+          if rec.get("overall") != "pass":
+              raise SystemExit("::error::CHGS smoke cases failed")
+          if v.get("residual"):
+              print("::warning::CHGS residual recorded: " + "; ".join(v.get("reasons", [])))
+          print("CHGS-LAB smoke: computed OK (verdict recorded in chgs/results/)")
+          PY
