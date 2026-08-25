@@ -5,9 +5,10 @@
 --        原文件未标类型，Lean4 无法推断绑定元类型
 --   [R2] Delta3 引用的 dagFrontier 原文件未定义——补占位定义（义务机 DAG 前沿节点表，
 --        后续由 Usrm.Obligation 七态机供给）
+--   [R3] Trace 由 def 改 abbrev——原文件 def 不透归约，Membership 实例解析无法穿透到 List
 inductive Ev | report | track | close | build | enable | order
   | respond | iterate | verify | feedback | act | decide | test
-def Trace := List (Ev × Nat)          -- 事件 × 时刻
+abbrev Trace := List (Ev × Nat)       -- 事件 × 时刻 [R3]
 def LeadsTo (a b : Ev) (τ : Trace) : Prop :=
   ∀ i, (a, i) ∈ τ → ∃ j, (b, j) ∈ τ ∧ j > i
 def Always (P : Trace → Prop) : Prop := ∀ τ, P τ
