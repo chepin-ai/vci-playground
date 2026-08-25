@@ -1,3 +1,5 @@
+import Usrm.Obligation
+
 /-!
 # 义务⇄证据 Galois 连接（P3 机判回填）· lean-lab L1
 
@@ -17,8 +19,6 @@ cvc5 在 `atp/oblig/p3_galois_broken.smt2` 判 sat 并给见证 (o,e)=(1,0)；
 纯 Lean4 core 路线：复用 `Usrm/Obligation.lean` 的极小 `PartialOrder` structure，
 一般化定理（Galois 连接 ⇒ 双单调 + 闭包/核）不依赖任何外部库。
 -/
-
-import Usrm.Obligation
 
 namespace Usrm
 
