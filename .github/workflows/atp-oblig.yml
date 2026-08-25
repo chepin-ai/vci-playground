@@ -1,0 +1,126 @@
+name: atp-oblig
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [atp-oblig]
+
+permissions:
+  contents: read
+
+jobs:
+  oblig:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install ATP engines (prover9/mace4 via apt, z3-solver + cvc5 via pip)
+        run: |
+          set -e
+          sudo apt-get update -qq
+          if ! sudo apt-get install -y --no-install-recommends prover9; then
+            echo "::warning::apt prover9 unavailable (not in noble), falling back to LADR 2009-11A source build"
+            mkdir -p /tmp/ladr && cd /tmp/ladr
+            curl -fsSL -o LADR.tar.gz https://www.cs.unm.edu/~mccune/prover9/download/LADR-2009-11A.tar.gz
+            tar xzf LADR.tar.gz
+            cd LADR-2009-11A
+            # fix link order: -lm must come after objects/libladr.a (undefined reference to `round` otherwise)
+            find . -name Makefile -exec sed -i 's|libladr\.a|libladr.a -lm|g' {} +
+            make all
+            sudo cp bin/prover9 bin/mace4 bin/isofilter /usr/local/bin/
+            cd "$GITHUB_WORKSPACE"
+          fi
+          command -v prover9 mace4 isofilter
+          python3 -m pip install --upgrade pip
+          python3 -m pip install z3-solver cvc5
+
+      - name: Run obligation-machine suite (P1 lattice / P2 BMC / P3 Galois)
+        id: suite
+        run: |
+          set +e
+          mkdir -p /tmp/atp-oblig
+          day="$(date -u +%F)"
+          python3 atp/oblig/run_oblig.py "/tmp/atp-oblig/$day.jsonl"
+          echo "suite_rc=$?" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Mint GitHub App token (push + issue comment)
+        id: app
+        if: always()
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.ATP_APP_ID }}
+          private-key: ${{ secrets.ATP_APP_PEM }}
+
+      - name: Publish results to atp/results/ (skip ci)
+        if: always()
+        run: |
+          set -e
+          mkdir -p atp/results
+          day="$(date -u +%F)"
+          if [ -f "/tmp/atp-oblig/$day.jsonl" ]; then
+            cat "/tmp/atp-oblig/$day.jsonl" >> "atp/results/$day.jsonl"
+          else
+            printf '{"ts":"%s","suite":"atp-oblig","engine":"none","property":"setup","role":"setup","verdict":"error","witness":"suite did not complete (setup failure)"}\n' \
+              "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "atp/results/$day.jsonl"
+          fi
+          git config user.name "atp-lab[bot]"
+          git config user.email "atp-lab[bot]@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${{ steps.app.outputs.token }}@github.com/${{ github.repository }}.git"
+          # actions/checkout persists GITHUB_TOKEN via http extraheader which overrides URL creds
+          git config --unset-all http.https://github.com/.extraheader || true
+          git add atp/results/
+          git commit -m "atp-lab: oblig results $day [skip ci]" || echo "nothing to commit"
+          git push origin HEAD:main
+
+      - name: Evaluate verdicts; comment failure summary to issue; fail run on unexpected verdict
+        if: always()
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          SUITE_RC: ${{ steps.suite.outputs.suite_rc }}
+        run: |
+          if [ "$SUITE_RC" = "0" ]; then
+            echo "ATP-LAB oblig: all verdicts as expected (dual discipline satisfied)"
+            exit 0
+          fi
+          echo "::error::ATP-LAB oblig: unexpected verdict(s) or setup failure"
+          repo="${{ github.repository }}"
+          api="https://api.github.com/repos/$repo"
+          num=1
+          code=$(curl -s -o /tmp/atp-oblig/issue1.json -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" "$api/issues/1")
+          if [ "$code" != "200" ]; then
+            num=$(curl -s -X POST \
+              -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              -d '{"title":"ATP-LAB 日志","body":"ATP-LAB 运行日志与失败摘要（本 issue 由 atp workflows 自动维护）。"}' \
+              "$api/issues" | python3 -c "import sys,json;print(json.load(sys.stdin)['number'])") || num=1
+          fi
+          python3 - "$repo" "$num" <<'PY'
+          import json, os, sys, urllib.request, datetime
+          repo, num = sys.argv[1], sys.argv[2]
+          day = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+          try:
+              recs = [json.loads(l) for l in open(f"/tmp/atp-oblig/{day}.jsonl")]
+          except FileNotFoundError:
+              recs = []
+          bad = [r for r in recs if r.get("verdict") in ("error", "missing",
+                 "not_proved", "countermodel_found") and r.get("role") == "control"
+                 or r.get("verdict") in ("error", "missing", "not_proved", "no_countermodel")]
+          body = ("ATP-LAB oblig 异常 @ " +
+                  datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") +
+                  "\n\n异常记录: " + str(len(bad)) +
+                  "\n\n```json\n" + json.dumps(bad or recs, indent=2, ensure_ascii=False)[:3000] + "\n```")
+          req = urllib.request.Request(
+              f"https://api.github.com/repos/{repo}/issues/{num}/comments",
+              data=json.dumps({"body": body}).encode(), method="POST",
+              headers={"Authorization": "Bearer " + os.environ["GH_TOKEN"],
+                       "Accept": "application/vnd.github+json",
+                       "X-GitHub-Api-Version": "2022-11-28",
+                       "Content-Type": "application/json"})
+          urllib.request.urlopen(req, timeout=30).read()
+          print(f"failure summary commented on issue #{num}")
+          PY
+          exit 1

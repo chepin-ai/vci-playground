@@ -1,0 +1,159 @@
+% P1-control (Mace4, must FAIL to find a countermodel): search a 7-element
+% structure satisfying the obligation tables but violating the lattice axioms.
+% Expected: domain exhausted, 0 models (confirms the Prover9 proof, dual discipline).
+assign(domain_size, 7).
+formulas(assumptions).
+  % domain: seven obligation states; closure + distinctness
+  all x (x=raised | x=fixed | x=implemented | x=tested | x=verified | x=legislated | x=wontfix).
+  raised != fixed.
+  raised != implemented.
+  raised != tested.
+  raised != verified.
+  raised != legislated.
+  raised != wontfix.
+  fixed != implemented.
+  fixed != tested.
+  fixed != verified.
+  fixed != legislated.
+  fixed != wontfix.
+  implemented != tested.
+  implemented != verified.
+  implemented != legislated.
+  implemented != wontfix.
+  tested != verified.
+  tested != legislated.
+  tested != wontfix.
+  verified != legislated.
+  verified != wontfix.
+  legislated != wontfix.
+  % partial order table (transition-edge reachability, reflexive-transitive closed)
+  le(raised,raised).
+  le(raised,fixed).
+  le(raised,implemented).
+  le(raised,tested).
+  le(raised,verified).
+  le(raised,legislated).
+  le(raised,wontfix).
+  le(fixed,fixed).
+  le(fixed,implemented).
+  le(fixed,tested).
+  le(fixed,verified).
+  le(fixed,legislated).
+  le(implemented,implemented).
+  le(implemented,tested).
+  le(implemented,verified).
+  le(implemented,legislated).
+  le(tested,tested).
+  le(tested,verified).
+  le(tested,legislated).
+  le(verified,verified).
+  le(verified,legislated).
+  le(legislated,legislated).
+  le(wontfix,legislated).
+  le(wontfix,wontfix).
+  % join table (least upper bound)
+  join(raised,raised) = raised.
+  join(raised,fixed) = fixed.
+  join(raised,implemented) = implemented.
+  join(raised,tested) = tested.
+  join(raised,verified) = verified.
+  join(raised,legislated) = legislated.
+  join(raised,wontfix) = wontfix.
+  join(fixed,raised) = fixed.
+  join(fixed,fixed) = fixed.
+  join(fixed,implemented) = implemented.
+  join(fixed,tested) = tested.
+  join(fixed,verified) = verified.
+  join(fixed,legislated) = legislated.
+  join(fixed,wontfix) = legislated.
+  join(implemented,raised) = implemented.
+  join(implemented,fixed) = implemented.
+  join(implemented,implemented) = implemented.
+  join(implemented,tested) = tested.
+  join(implemented,verified) = verified.
+  join(implemented,legislated) = legislated.
+  join(implemented,wontfix) = legislated.
+  join(tested,raised) = tested.
+  join(tested,fixed) = tested.
+  join(tested,implemented) = tested.
+  join(tested,tested) = tested.
+  join(tested,verified) = verified.
+  join(tested,legislated) = legislated.
+  join(tested,wontfix) = legislated.
+  join(verified,raised) = verified.
+  join(verified,fixed) = verified.
+  join(verified,implemented) = verified.
+  join(verified,tested) = verified.
+  join(verified,verified) = verified.
+  join(verified,legislated) = legislated.
+  join(verified,wontfix) = legislated.
+  join(legislated,raised) = legislated.
+  join(legislated,fixed) = legislated.
+  join(legislated,implemented) = legislated.
+  join(legislated,tested) = legislated.
+  join(legislated,verified) = legislated.
+  join(legislated,legislated) = legislated.
+  join(legislated,wontfix) = legislated.
+  join(wontfix,raised) = wontfix.
+  join(wontfix,fixed) = legislated.
+  join(wontfix,implemented) = legislated.
+  join(wontfix,tested) = legislated.
+  join(wontfix,verified) = legislated.
+  join(wontfix,legislated) = legislated.
+  join(wontfix,wontfix) = wontfix.
+  % meet table (greatest lower bound)
+  meet(raised,raised) = raised.
+  meet(raised,fixed) = raised.
+  meet(raised,implemented) = raised.
+  meet(raised,tested) = raised.
+  meet(raised,verified) = raised.
+  meet(raised,legislated) = raised.
+  meet(raised,wontfix) = raised.
+  meet(fixed,raised) = raised.
+  meet(fixed,fixed) = fixed.
+  meet(fixed,implemented) = fixed.
+  meet(fixed,tested) = fixed.
+  meet(fixed,verified) = fixed.
+  meet(fixed,legislated) = fixed.
+  meet(fixed,wontfix) = raised.
+  meet(implemented,raised) = raised.
+  meet(implemented,fixed) = fixed.
+  meet(implemented,implemented) = implemented.
+  meet(implemented,tested) = implemented.
+  meet(implemented,verified) = implemented.
+  meet(implemented,legislated) = implemented.
+  meet(implemented,wontfix) = raised.
+  meet(tested,raised) = raised.
+  meet(tested,fixed) = fixed.
+  meet(tested,implemented) = implemented.
+  meet(tested,tested) = tested.
+  meet(tested,verified) = tested.
+  meet(tested,legislated) = tested.
+  meet(tested,wontfix) = raised.
+  meet(verified,raised) = raised.
+  meet(verified,fixed) = fixed.
+  meet(verified,implemented) = implemented.
+  meet(verified,tested) = tested.
+  meet(verified,verified) = verified.
+  meet(verified,legislated) = verified.
+  meet(verified,wontfix) = raised.
+  meet(legislated,raised) = raised.
+  meet(legislated,fixed) = fixed.
+  meet(legislated,implemented) = implemented.
+  meet(legislated,tested) = tested.
+  meet(legislated,verified) = verified.
+  meet(legislated,legislated) = legislated.
+  meet(legislated,wontfix) = wontfix.
+  meet(wontfix,raised) = raised.
+  meet(wontfix,fixed) = raised.
+  meet(wontfix,implemented) = raised.
+  meet(wontfix,tested) = raised.
+  meet(wontfix,verified) = raised.
+  meet(wontfix,legislated) = wontfix.
+  meet(wontfix,wontfix) = wontfix.
+  % negated lattice claim: at least one of the four universal conjuncts fails
+  -(all x all y (le(x, join(x,y)) & le(y, join(x,y)))) |
+  -(all x all y all z ((le(x,z) & le(y,z)) -> le(join(x,y),z))) |
+  -(all x all y (le(meet(x,y),x) & le(meet(x,y),y))) |
+  -(all x all y all z ((le(z,x) & le(z,y)) -> le(z,meet(x,y)))).
+end_of_list.

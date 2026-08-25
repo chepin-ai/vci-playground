@@ -1,0 +1,15 @@
+% P1-refutation (Mace4, must FIND a finite countermodel):
+% the (deliberately wrong) claim "every lattice is a total order".
+% c1,c2 are forced incomparable: their meet is neither of them.
+% Expected: a finite non-total lattice (e.g. the 4-element boolean lattice).
+assign(domain_size, 4).
+formulas(assumptions).
+  x * y = y * x.
+  x + y = y + x.
+  (x * y) * z = x * (y * z).
+  (x + y) + z = x + (y + z).
+  x * (x + y) = x.
+  x + (x * y) = x.
+  c1 * c2 != c1.
+  c1 * c2 != c2.
+end_of_list.
