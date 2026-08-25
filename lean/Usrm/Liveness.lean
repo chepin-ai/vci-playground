@@ -166,12 +166,19 @@ theorem stallTrace_not_fair : ¬ LTrace.Fair stallTrace := by
 -- 下列正命题应证不出（N9′ 的 fairness 假设不可去），故意保留为注释：
 --   theorem unfair_leads_to_terminal :
 --       ∀ τ, LTrace.Valid τ → LeadsTo τ LState.Terminal 0   -- ✗ 反例即 stallTrace
+/-- 语义钉：pending 非终态（全闭命题 decide 核判，对照件共用） -/
+theorem terminal_pending_false : ¬ LState.Terminal .pending := by
+  intro h
+  cases h with
+  | inl e => exact absurd e (by decide)
+  | inr e => exact absurd e (by decide)
+
 /-- 对照件（负）机判：去 fairness 假设，滞留迹永不达终态（N9′ 公平性前提的必要性钉） -/
 theorem stallTrace_not_leadsTo : ¬ LeadsTo stallTrace LState.Terminal 0 := by
   intro h
   obtain ⟨t, _, hterm⟩ := h
-  cases hterm with
-  | inl e => exact absurd e (by decide)
-  | inr e => exact absurd e (by decide)
+  have hp : stallTrace t = .pending := rfl
+  rw [hp] at hterm
+  exact terminal_pending_false hterm
 
 end Usrm
