@@ -199,8 +199,8 @@ theorem gammaWrong_spec : ∀ e : Ev4, (gammaWrong e).toNat = min 3 (2 * e.toNat
 在见证点：右侧 `α(o1)=e0 ≤ e0` 为真，左侧 `o1 ≤ γ_wrong(e0)=o0` 为假。 -/
 example : ¬ (∀ (o : Obl4) (e : Ev4), Obl4.Le o (gammaWrong e) ↔ Ev4.Le (alpha o) e) := by
   intro h
-  have hb : Ev4.Le (alpha Obl4.o1) Ev4.e0 := by decide
-  have ha : Obl4.Le Obl4.o1 (gammaWrong Ev4.e0) := (h Obl4.o1 Ev4.e0).mpr hb
-  exact absurd ha (by decide)
+  have hb : Ev4.leb (alpha Obl4.o1) Ev4.e0 = true := by decide
+  have ha : Obl4.leb Obl4.o1 (gammaWrong Ev4.e0) = true := (h Obl4.o1 Ev4.e0).mpr hb
+  exact absurd ha (by decide : ¬ Obl4.leb Obl4.o1 (gammaWrong Ev4.e0) = true)
 
 end Usrm
