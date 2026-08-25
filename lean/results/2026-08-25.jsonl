@@ -1,0 +1,1 @@
+{"ts": "2026-08-25T15:33:19Z", "suite": "lean-build", "engine": "lean4", "toolchain": "leanprover/lean4:v4.9.0", "run_id": "32866492367", "property": "lake_build", "role": "positive", "verdict": "fail", "build_secs": 1, "witness": "lake build rc=1; sorry_free=True"}
