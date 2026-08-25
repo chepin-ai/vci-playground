@@ -1,0 +1,1 @@
+{"ts": "2026-08-25T05:00:23Z", "engines": {"z3": {"status": "pass", "version": "5.1.0"}, "cvc5": {"status": "pass", "version": "1.3.4"}, "mace4": {"status": "pass", "version": "2009-11A"}, "prover9": {"status": "pass", "version": "2009-11A"}}, "overall": "pass"}
