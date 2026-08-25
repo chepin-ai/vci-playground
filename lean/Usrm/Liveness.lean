@@ -101,8 +101,8 @@ theorem lstep_terminal_absorbing {s t : LState} (hs : LState.Terminal s) (h : LS
     LState.Terminal t := by
   have h0 : LState.rank s = 0 := by
     cases hs with
-    | inl e => rw [e]
-    | inr e => rw [e]
+    | inl e => subst e; rfl
+    | inr e => subst e; rfl
   exact terminal_of_rank_zero (Nat.eq_zero_of_le_zero (h0 ▸ lstep_rank_le h))
 
 /-- 活性步一：处理中的义务在公平迹上必达终态。
