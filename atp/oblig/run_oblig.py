@@ -2,7 +2,10 @@
 """ATP-LAB obligation-machine suite runner.
 
 Runs P1 (Prover9/Mace4 lattice proof + dual controls), P2 (Z3 BMC),
-P3 (cvc5 Galois connection) and appends one JSONL record per conclusion:
+P3 (cvc5 Galois connection), P4 (Z3 encode/decode matrix over F2^8),
+P5 (Prover9/Mace4 ladder-escalation monotonicity) and P6 (Z3 Whittle
+admission invariants, BMC + inductive step); appends one JSONL record
+per conclusion:
   {ts, suite, engine, property, role, verdict, witness}
 `witness` is a truncated proof/countermodel/trace summary (no secrets).
 
@@ -125,6 +128,92 @@ def main():
                vb.group(1) if vb else "error",
                "violating-pair witness (o,e): " + (wb.group(1) if wb else trunc(out)),
                bool(vb and vb.group(1) == "sat"))
+
+    # ---------------- P4: Z3 encode/decode matrix over F2^8 ----------------
+    if shutil.which("python3"):
+        rc, out = run([sys.executable or "python3", "p4_codec.py"])
+        va = re.search(r"P4A_VERDICT=(\w+)", out)
+        vb = re.search(r"P4B_VERDICT=(\w+)", out)
+        vc = re.search(r"P4C_VERDICT=(\w+)", out)
+        vd = re.search(r"P4D_VERDICT=(\w+)", out)
+        da = re.search(r"P4A_DETAIL=(.*)", out)
+        wb = re.search(r"P4B_WITNESS=(.*)", out)
+        dc = re.search(r"P4C_DETAIL=(.*)", out)
+        wd = re.search(r"P4D_WITNESS=(.*)", out)
+        record("z3", "P4_encode_decode_correct_f2_8", "positive",
+               va.group(1) if va else "error",
+               da.group(1) if da else trunc(out),
+               bool(va and va.group(1) == "unsat"))
+        record("z3", "P4_observation_masking_bounded_witness", "positive",
+               vb.group(1) if vb else "error",
+               "masking witness: " + (wb.group(1) if wb else trunc(out)),
+               bool(vb and vb.group(1) == "sat"))
+        record("z3", "P4_no_observation_leak_full_rank", "control",
+               vc.group(1) if vc else "error",
+               dc.group(1) if dc else trunc(out),
+               bool(vc and vc.group(1) == "unsat"))
+        record("z3", "P4_observation_leak_rank_deficient", "refutation",
+               vd.group(1) if vd else "error",
+               "leak witness: " + (wd.group(1) if wd else trunc(out)),
+               bool(vd and vd.group(1) == "sat"))
+
+    # ---------------- P5: ladder escalation monotonicity ----------------
+    if prover9:
+        rc1, out1 = run([prover9, "-f", "p5_ladder_pos.in"])
+        rc2, out2 = run([prover9, "-f", "p5_ladder_order.in"])
+        n_proofs = out1.count("THEOREM PROVED") + out2.count("THEOREM PROVED")
+        ok = ("THEOREM PROVED" in out1) and ("THEOREM PROVED" in out2)
+        record("prover9", "P5_ladder_escalation_monotone_idempotent", "positive",
+               "proved" if ok else "not_proved",
+               "goals: esc non-retreating, idempotent (p5_ladder_pos), "
+               "order-preserving (p5_ladder_order) over L0<L1<L2<L3; "
+               f"Prover9 THEOREM PROVED={ok}", ok)
+
+    if mace4:
+        # control: no countermodel to the three escalation properties (size 4)
+        rc, out = run([mace4, "-f", "p5_ladder_control.in"])
+        n_models = out.count("interpretation(")
+        exhausted = "exit (exhausted)" in out
+        ok = n_models == 0 and exhausted
+        record("mace4", "P5_ladder_escalation_monotone_idempotent", "control",
+               "refutation_failed" if ok else "countermodel_found",
+               f"size-4 countermodel search to escalation claim: models={n_models}, "
+               f"exhausted={exhausted} (expected 0/exhausted)", ok)
+
+        # refutation: without the idempotence assumption a countermodel exists
+        rc, out = run([mace4, "-f", "p5_no_idempotent.in"])
+        n_models = out.count("interpretation(")
+        ok = n_models > 0
+        interp = ""
+        m = re.search(r"(interpretation\(.*?\]\)\.\n)", out, re.S)
+        if m:
+            interp = m.group(1)
+        record("mace4", "P5_monotone_escalation_always_idempotent", "refutation",
+               "countermodel_found" if ok else "no_countermodel",
+               "non-idempotent monotone esc (idempotence assumption dropped): "
+               + interp, ok)
+
+    # ---------------- P6: Z3 Whittle admission invariants ----------------
+    if shutil.which("python3"):
+        rc, out = run([sys.executable or "python3", "p6_whittle.py"])
+        va = re.search(r"P6A_VERDICT=(\w+)", out)
+        vb = re.search(r"P6B_VERDICT=(\w+)", out)
+        vc = re.search(r"P6C_VERDICT=(\w+)", out)
+        da = re.search(r"P6A_DETAIL=(.*)", out)
+        db = re.search(r"P6B_DETAIL=(.*)", out)
+        tc = re.search(r"P6C_TRACE=(.*)", out)
+        record("z3", "P6_whittle_invariant_bmc_k6", "positive",
+               va.group(1) if va else "error",
+               da.group(1) if da else trunc(out),
+               bool(va and va.group(1) == "unsat"))
+        record("z3", "P6_whittle_invariant_inductive_step", "positive",
+               vb.group(1) if vb else "error",
+               db.group(1) if db else trunc(out),
+               bool(vb and vb.group(1) == "unsat"))
+        record("z3", "P6_whittle_no_capacity_check", "refutation",
+               vc.group(1) if vc else "error",
+               "counter-trace: " + (tc.group(1) if tc else trunc(out)),
+               bool(vc and vc.group(1) == "sat"))
 
     os.makedirs(os.path.dirname(out_jsonl), exist_ok=True)
     with open(out_jsonl, "a") as f:

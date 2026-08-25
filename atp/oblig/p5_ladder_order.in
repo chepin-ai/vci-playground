@@ -1,0 +1,40 @@
+% P5-positive (goal 3/3): ladder escalation is order-preserving.
+% Same ladder tables as p5_ladder_pos.in (kept separate because Prover9
+% allows multiple goals only when all are positive; an implication goal
+% must go alone).
+formulas(assumptions).
+  % domain: four ladder states; closure + distinctness
+  all x (x=l0 | x=l1 | x=l2 | x=l3).
+  l0 != l1.
+  l0 != l2.
+  l0 != l3.
+  l1 != l2.
+  l1 != l3.
+  l2 != l3.
+  % total order L0 < L1 < L2 < L3 (reflexive-transitive closed)
+  le(l0,l0).
+  le(l0,l1).
+  le(l0,l2).
+  le(l0,l3).
+  le(l1,l1).
+  le(l1,l2).
+  le(l1,l3).
+  le(l2,l2).
+  le(l2,l3).
+  le(l3,l3).
+  % escalation table (age-threshold driven)
+  esc(l0) = l1.
+  esc(l1) = l1.
+  esc(l2) = l3.
+  esc(l3) = l3.
+end_of_list.
+
+formulas(goals).
+  % order-preserving: escalation respects the ladder order.
+  % Ground expansion over the 4-element chain (all le-table pairs):
+  % avoids unbounded esc-term nesting in the quantified denial.
+  le(esc(l0),esc(l0)) & le(esc(l0),esc(l1)) & le(esc(l0),esc(l2)) &
+  le(esc(l0),esc(l3)) & le(esc(l1),esc(l1)) & le(esc(l1),esc(l2)) &
+  le(esc(l1),esc(l3)) & le(esc(l2),esc(l2)) & le(esc(l2),esc(l3)) &
+  le(esc(l3),esc(l3)).
+end_of_list.

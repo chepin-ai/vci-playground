@@ -1,0 +1,40 @@
+% P5-refutation (Mace4, must FIND a finite countermodel): the deliberately
+% wrong claim "monotone non-retreating + order-preserving escalation is
+% automatically idempotent". The idempotence guarantee (esc table) is
+% dropped: esc is only constrained by the two monotonicity axioms, and we
+% ask for a model where idempotence fails. Expected countermodel: the
+% capped successor esc = min(x+1, L3), e.g. esc(L0)=L1, esc(L1)=L2.
+assign(domain_size, 4).
+formulas(assumptions).
+  % domain: four ladder states; closure + distinctness
+  all x (x=l0 | x=l1 | x=l2 | x=l3).
+  l0 != l1.
+  l0 != l2.
+  l0 != l3.
+  l1 != l2.
+  l1 != l3.
+  l2 != l3.
+  % total order L0 < L1 < L2 < L3 (reflexive-transitive closed)
+  le(l0,l0).
+  le(l0,l1).
+  le(l0,l2).
+  le(l0,l3).
+  le(l1,l1).
+  le(l1,l2).
+  le(l1,l3).
+  le(l2,l2).
+  le(l2,l3).
+  le(l3,l3).
+  % le is EXACTLY the chain (no spurious pairs): pin the non-pairs
+  -le(l1,l0).
+  -le(l2,l0).
+  -le(l2,l1).
+  -le(l3,l0).
+  -le(l3,l1).
+  -le(l3,l2).
+  % esc keeps the two monotonicity axioms ...
+  all x le(x, esc(x)).
+  all x all y (le(x,y) -> le(esc(x),esc(y))).
+  % ... but the idempotence assumption is REMOVED; require a violation
+  exists x esc(esc(x)) != esc(x).
+end_of_list.

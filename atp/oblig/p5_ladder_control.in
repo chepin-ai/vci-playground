@@ -1,0 +1,42 @@
+% P5-control (Mace4, must FAIL to find a countermodel): search a 4-element
+% structure satisfying the ladder tables but violating at least one of the
+% three escalation properties. Expected: domain exhausted, 0 models
+% (confirms the Prover9 proof, dual discipline).
+assign(domain_size, 4).
+formulas(assumptions).
+  % domain: four ladder states; closure + distinctness
+  all x (x=l0 | x=l1 | x=l2 | x=l3).
+  l0 != l1.
+  l0 != l2.
+  l0 != l3.
+  l1 != l2.
+  l1 != l3.
+  l2 != l3.
+  % total order L0 < L1 < L2 < L3 (reflexive-transitive closed)
+  le(l0,l0).
+  le(l0,l1).
+  le(l0,l2).
+  le(l0,l3).
+  le(l1,l1).
+  le(l1,l2).
+  le(l1,l3).
+  le(l2,l2).
+  le(l2,l3).
+  le(l3,l3).
+  % le is EXACTLY the chain (no spurious pairs): pin the non-pairs
+  -le(l1,l0).
+  -le(l2,l0).
+  -le(l2,l1).
+  -le(l3,l0).
+  -le(l3,l1).
+  -le(l3,l2).
+  % escalation table (age-threshold driven)
+  esc(l0) = l1.
+  esc(l1) = l1.
+  esc(l2) = l3.
+  esc(l3) = l3.
+  % negated claim: at least one of the three properties fails
+  -(all x le(x, esc(x))) |
+  -(all x esc(esc(x)) = esc(x)) |
+  -(all x all y (le(x,y) -> le(esc(x),esc(y)))).
+end_of_list.

@@ -1,0 +1,38 @@
+% P5-positive (goal 1/3): ladder escalation is non-retreating.
+% Ladder L0 < L1 < L2 < L3 (total order); esc is driven by age thresholds:
+% esc(x) = least ladder state whose threshold covers the age accumulated at
+% x. Toy instance: esc(L0)=L1, esc(L1)=L1, esc(L2)=L3, esc(L3)=L3.
+% Prover9 must prove: escalation never moves down the ladder.
+formulas(assumptions).
+  % domain: four ladder states; closure + distinctness
+  all x (x=l0 | x=l1 | x=l2 | x=l3).
+  l0 != l1.
+  l0 != l2.
+  l0 != l3.
+  l1 != l2.
+  l1 != l3.
+  l2 != l3.
+  % total order L0 < L1 < L2 < L3 (reflexive-transitive closed)
+  le(l0,l0).
+  le(l0,l1).
+  le(l0,l2).
+  le(l0,l3).
+  le(l1,l1).
+  le(l1,l2).
+  le(l1,l3).
+  le(l2,l2).
+  le(l2,l3).
+  le(l3,l3).
+  % escalation table (age-threshold driven)
+  esc(l0) = l1.
+  esc(l1) = l1.
+  esc(l2) = l3.
+  esc(l3) = l3.
+end_of_list.
+
+formulas(goals).
+  % (1) non-retreating: escalation never moves down the ladder
+  all x le(x, esc(x)).
+  % (2) idempotent: once escalated, stable (no oscillation)
+  all x esc(esc(x)) = esc(x).
+end_of_list.

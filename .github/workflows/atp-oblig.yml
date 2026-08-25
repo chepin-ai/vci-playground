@@ -35,7 +35,7 @@ jobs:
           python3 -m pip install --upgrade pip
           python3 -m pip install z3-solver cvc5
 
-      - name: Run obligation-machine suite (P1 lattice / P2 BMC / P3 Galois)
+      - name: Run obligation-machine suite (P1 lattice / P2 BMC / P3 Galois / P4 codec / P5 ladder / P6 Whittle)
         id: suite
         run: |
           set +e
