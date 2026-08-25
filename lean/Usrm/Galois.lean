@@ -122,10 +122,19 @@ theorem alpha_spec : ∀ o : Obl4, (alpha o).toNat = o.toNat / 2 := by
 theorem gamma_spec : ∀ e : Ev4, (gamma e).toNat = min 3 (2 * e.toNat + 1) := by
   intro e; cases e <;> decide
 
-/-- P3 主定理：义务⇄证据 Galois 连接，4×4 全表核判（cvc5 `p3_galois_valid` 判 unsat 的正面对应） -/
+/-- P3 主定理（Bool 核判层）：两侧偏序表 4×4 全表逐点相等
+（core 无 `Decidable (p ↔ q)` 实例，故全表枚举在 Bool 等式上进行） -/
+theorem galois_conn_bool :
+    ∀ (o : Obl4) (e : Ev4), Obl4.leb o (gamma e) = Ev4.leb (alpha o) e := by
+  intro o e; cases o <;> cases e <;> decide
+
+/-- P3 主定理：义务⇄证据 Galois 连接（cvc5 `p3_galois_valid` 判 unsat 的正面对应）。
+由 Bool 核判层重写即得，无逐点枚举、无公理残留。 -/
 theorem galois_conn :
     ∀ (o : Obl4) (e : Ev4), Obl4.Le o (gamma e) ↔ Ev4.Le (alpha o) e := by
-  intro o e; cases o <;> cases e <;> decide
+  intro o e
+  show Obl4.leb o (gamma e) = true ↔ Ev4.leb (alpha o) e = true
+  rw [galois_conn_bool o e]
 
 /-- 一般化：任意偏序集之间的 Galois 连接 ⇒ 双单调 + 闭包/核。
 伴随基本定理的四个分量，全部从公理 `gc` 与偏序三法则推出（无逐点枚举）。 -/
@@ -182,14 +191,16 @@ theorem gammaWrong_spec : ∀ e : Ev4, (gammaWrong e).toNat = min 3 (2 * e.toNat
 -- @falsified galois_gamma_wrong witness=(o,e)=(1,0): 1 ≤ min(3,2·0)=0 为假 而 α(1)=0 ≤ 0 为真
 -- 见证来源：cvc5 对 atp/oblig/p3_galois_broken.smt2 判 sat，模型 (o,e)=(1,0)，与 P3 正例
 -- （p3_galois_valid.smt2 判 unsat）构成 ATP 正反互补。下列正命题应证不出，故意保留为注释：
---   example : ∀ (o : Obl4) (e : Ev4), Obl4.Le o (gammaWrong e) ↔ Ev4.Le (alpha o) e := by
+--   theorem galois_conn_wrong :
+--       ∀ (o : Obl4) (e : Ev4), Obl4.Le o (gammaWrong e) ↔ Ev4.Le (alpha o) e := by
 --     intro o e; cases o <;> cases e <;> decide   -- ✗ (o1,e0) 分支 decide 失败
 
-/-- 负面对照的机判：γ_wrong 破坏 Galois 公理，反例即 cvc5 见证 (o,e)=(1,0) -/
+/-- 负面对照的机判：γ_wrong 破坏 Galois 公理，反例即 cvc5 见证 (o,e)=(1,0)。
+在见证点：右侧 `α(o1)=e0 ≤ e0` 为真，左侧 `o1 ≤ γ_wrong(e0)=o0` 为假。 -/
 example : ¬ (∀ (o : Obl4) (e : Ev4), Obl4.Le o (gammaWrong e) ↔ Ev4.Le (alpha o) e) := by
   intro h
-  have hw := h Obl4.o1 Ev4.e0
-  revert hw
-  decide
+  have hb : Ev4.Le (alpha Obl4.o1) Ev4.e0 := by decide
+  have ha : Obl4.Le Obl4.o1 (gammaWrong Ev4.e0) := (h Obl4.o1 Ev4.e0).mpr hb
+  exact absurd ha (by decide)
 
 end Usrm
