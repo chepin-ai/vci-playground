@@ -54,6 +54,9 @@ jobs:
           no_block = re.sub(r"/-.*?-/", "", no_line, flags=re.S)
           sorry_free = not re.search(r"\bsorry\b", no_block)
           theorems = re.findall(r"^theorem\s+([A-Za-z0-9_.']+)", src, flags=re.M)
+          # 负面对照标记：-- @falsified <name> witness=<...>（机判反例，ATP 正反互补）
+          falsified = re.findall(r"^--\s*@falsified\s+([A-Za-z0-9_.']+)\s+witness=(.+)$",
+                                 src, flags=re.M)
           toolchain = pathlib.Path("lean/lean-toolchain").read_text().strip()
           rc = int(os.environ.get("BUILD_RC") or "1")
           secs = int(os.environ.get("BUILD_SECS") or "0")
@@ -66,11 +69,15 @@ jobs:
               for t in theorems:
                   recs.append({**base, "property": t, "role": "positive", "verdict": "proved",
                                "witness": "closed by lean4 kernel; no sorry"})
+              for name, wit in falsified:
+                  recs.append({**base, "property": name, "role": "negative",
+                               "verdict": "falsified",
+                               "witness": f"counterexample kernel-checked in lean source; {wit.strip()}"})
           out = pathlib.Path("/tmp/lean-results"); out.mkdir(exist_ok=True)
           with open(out / f"{day}.jsonl", "a") as f:
               for r in recs:
                   f.write(json.dumps(r, ensure_ascii=False) + "\n")
-          print(f"sorry_free={sorry_free} theorems={theorems}")
+          print(f"sorry_free={sorry_free} theorems={theorems} falsified={[n for n, _ in falsified]}")
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
               f.write(f"sorry_free={'true' if sorry_free else 'false'}\n")
           PY
