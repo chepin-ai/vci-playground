@@ -15,8 +15,8 @@ jobs:
     steps:
       - name: 作业卡驱动（空队即退，零空转）
         env:
-          APPK: ${{ secrets.CI_OPS_HUB_KEY }}
-          HUB_ID: ${{ vars.CI_OPS_HUB_ID }}
+          APPK: ${{ secrets.CI_OPS_LINE_KEY }}
+          HUB_ID: ${{ vars.CI_OPS_LINE_ID }}
         run: |
           [ -n "$APPK" ] || { echo "IDLE: hub key 未落"; exit 0; }
           set -e
