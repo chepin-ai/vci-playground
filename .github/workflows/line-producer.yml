@@ -4,8 +4,6 @@ on:
   workflow_dispatch: {}
   push:
     paths: ['.github/workflows/line-producer.yml', 'weave/**']
-  schedule:
-    - cron: '11 */6 * * *'
 permissions:
   contents: read
 jobs:
