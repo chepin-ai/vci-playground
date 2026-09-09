@@ -1,8 +1,8 @@
 name: bench-qlv
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '23 */6 * * *'
+  repository_dispatch:
+    types: [bench-qlv]
 permissions:
   contents: read
 concurrency:
