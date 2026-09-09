@@ -20,19 +20,7 @@ jobs:
         run: |
           [ -n "$APPK" ] || { echo "IDLE: hub key 未落"; exit 0; }
           set -e
-          printf '%s' "$APPK" > /tmp/hub.pem
-          pip install -q pyjwt cryptography
-          cat > /tmp/mint.py <<'PYE'
-          import jwt,time,json,urllib.request,os
-          now=int(time.time())
-          t=jwt.encode({'iat':now-60,'exp':now+540,'iss':os.environ['HUB_ID']},open('/tmp/hub.pem').read(),algorithm='RS256')
-          H={'Authorization':'Bearer '+t,'Accept':'application/vnd.github+json'}
-          inst=json.loads(urllib.request.urlopen(urllib.request.Request('https://api.github.com/app/installations',headers=H)).read())
-          iid=[i['id'] for i in inst if i['account']['login']=='chepin-ai'][0]
-          r=urllib.request.Request('https://api.github.com/app/installations/%s/access_tokens'%iid,method='POST',headers=H); r.data=b'{}'
-          print(json.loads(urllib.request.urlopen(r).read())['token'])
-          PYE
-          IT=$(python3 /tmp/mint.py); rm -f /tmp/hub.pem /tmp/mint.py
+          IT="$APPK"  # 修: 同名异型病治理——CI_OPS_LINE_KEY实为classic PAT,直用不铸JWT
           # 轻量预查：空队即退（不装重依赖，零空转）
           QN=$(curl -s --max-time 20 -H "Authorization: Bearer ${IT}" "https://api.github.com/repos/chepin-ai/qlv-lab/contents/lines/qlv/bench/queue" | python3 -c "import sys,json
           try: print(len([f for f in json.load(sys.stdin) if f['name'].endswith('.json')]))
